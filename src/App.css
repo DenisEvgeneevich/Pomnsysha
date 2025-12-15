@@ -1,0 +1,268 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+ul {
+    margin: 0;
+    padding: 0;
+    list-style-type: none;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+}
+
+label {
+    display: flex;
+    align-items: center;
+    gap: 17px;
+    cursor: pointer;
+}
+
+label span {
+    font-size: 21px;
+    font-weight: 700;
+}
+
+label input[type='checkbox']{
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #ccc;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    position: relative;
+}
+
+label input[type="checkbox"]:hover {
+    border-color: #888;
+}
+
+label input[type="checkbox"]:checked {
+    border-color: #888;
+    background-color: #FFAE3E;
+}
+
+.container {
+    max-width: 85vw;
+    margin: 0 auto;
+}
+
+.app-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.main {
+    display: flex;
+    flex: 1 0 auto;
+    width: 100%;
+    background-color: #FFAE3E;
+    padding: 0 0 20px 0;
+    min-height: calc(100vh - 150px);
+}
+
+.main-todos {
+    margin-top: 55px;
+    display: flex;
+    height: 85vh;
+    width: 70vw;
+    flex-direction: column;
+    justify-content: center;
+    gap: 70px;
+    border-radius: 25px;
+    padding: 90px 80px;
+    background-color: #FFF9DA;
+}
+
+.main-hello {
+    font-size: 45px;
+    color: #573D27;
+}
+
+.main-title {
+    font-size: 30px;
+    color: #573D27;
+}
+
+.main-list {
+    background-color: #FFFFFF;
+    color: #573D27;
+    border-radius: 30px;
+    padding: 60px 50px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.main-list li {
+  transition: all 0.3s ease;
+}
+
+.main-list li.fade-out {
+  opacity: 0;
+  transform: translateX(-20px);
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* Стиль для зачёркнутых задач */
+.task-text[style*="line-through"] {
+  color: #888;
+  font-style: italic;
+}
+
+.main-btn {
+    display: block;
+    padding: 20px 40px;
+    background-color: #C18F64;
+    color: #FFF9DA;
+    border: none;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all .3s ease;
+    white-space: nowrap;
+}
+
+.main-btn:hover {
+    background-color: #f5e0e0;
+    color: #866346;
+}
+
+.footer {
+  flex-shrink: 0;
+  background-color: #573D27;
+  color: #FFF9DA;
+  padding: 20px 0;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.footer-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 20px;
+}
+
+.footer-icons-panel {
+  background-color: #FFFFFF;
+  border-radius: 15px;
+  padding: 5px 20px;
+  width: 130%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 40px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.icon-button {
+  width: 65px;
+  height: 65px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  position: relative;
+}
+
+
+.icon-button:hover {
+  transform: scale(1.1);
+}
+
+.icon-button:active {
+  transform: scale(0.95);
+}
+
+.icon-button img {
+  width: 55px;
+  height: 55px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+
+.google-auth-section {
+  display: flex;
+  justify-content: flex-end;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 0 10px;
+}
+
+.google-auth-btn {
+  background: #573D27;
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 25px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Montserrat', sans-serif;
+}
+
+.google-auth-btn:hover {
+  background: #C18F64;
+  transform: translateY(-2px);
+}
+
+.google-auth-btn.authenticated {
+  background: #34A853;
+}
+
+.sync-toggle {
+  background: #FFAE3E;
+  color: #573D27;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 25px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Montserrat', sans-serif;
+}
+
+.sync-toggle:hover {
+  background: #FFC107;
+  transform: translateY(-2px);
+}
+
+.sync-toggle.syncing {
+  background: #4285F4;
+  color: white;
+}
+
+/* Адаптивность для кнопок авторизации */
+@media (max-width: 768px) {
+  .google-auth-section {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+  }
+  
+  .google-auth-btn,
+  .sync-toggle {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+}
+
