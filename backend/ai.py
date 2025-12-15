@@ -1,8 +1,10 @@
+import json
 import os
-import requests
-import uuid
 import re
+import uuid
 from datetime import datetime, timedelta
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,7 +15,55 @@ API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
 TOKEN_CACHE = None
 
+CATEGORIES = ["Работа", "Учеба", "Личное", "Здоровье", "Покупки", "Встречи"]
+PRIORITIES = {"high", "medium", "low"}
+
 # Функции для работы с календарем и анализом запросов
+def _today_with_weekday():
+    now = datetime.now()
+    weekdays = [
+        "понедельник",
+        "вторник",
+        "среда",
+        "четверг",
+        "пятница",
+        "суббота",
+        "воскресенье",
+    ]
+    return now.date(), weekdays[now.weekday()]
+
+
+def _build_gigachat_prompt(user_text: str) -> str:
+    today_date, weekday = _today_with_weekday()
+    return f"""
+Ты — интеллектуальный помощник для планирования. Твоя задача — анализировать короткие текстовые заметки пользователя на русском языке и извлекать из них структурированные данные для создания события в календаре.
+
+ПРАВИЛА АНАЛИЗА:
+1.  СЕГОДНЯШНЯЯ ДАТА: {today_date:%Y-%m-%d} ({weekday}). Все относительные даты ("завтра", "через неделю") вычисляй относительно неё.
+2.  НАЗВАНИЕ: Сформулируй краткое (3-7 слов), четкое и понятное название задачи или события на русском языке, используя ключевые слова из заметки. Убери мусорные слова ("надо", "не забыть").
+3.  ДАТА и ВРЕМЯ: Извлеки ВСЕ упоминания дат и времени. Если дата явно не указана, считай, что событие должно произойти СЕГОДНЯ. Если время не указано, укажи null.
+4.  КАТЕГОРИЯ: Выбери ОДНУ из: {CATEGORIES}. Определяй по контексту.
+5.  ПРИОРИТЕТ: Определи по тону и ключевым словам:
+    - "high" (высокий): если есть слова "срочно", "важно", "критично", "!!!", "очень надо".
+    - "medium" (средний): по умолчанию, для нейтральных поручений.
+    - "low" (низкий): если есть слова "не срочно", "когда будет время", "может быть".
+
+ФОРМАТ ОТВЕТА:
+Ты должен ответить ТОЛЬКО в виде JSON-объекта, строго по следующей схеме:
+{{
+  "title": "string",
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM или null",
+  "category": "string из списка выше",
+  "priority": "high/medium/low"
+}}
+
+НИКАКОГО пояснительного текста, только JSON.
+
+ТЕКСТ ПОЛЬЗОВАТЕЛЯ ДЛЯ АНАЛИЗА: "{user_text}"
+"""
+
+
 def parse_event_request(message: str) -> dict:
     """
     Анализирует сообщение пользователя на предмет запроса создания события.
@@ -88,6 +138,159 @@ def parse_event_request(message: str) -> dict:
         'time': requested_time,
         'description': description or 'Событие'
     }
+
+
+def _normalize_title(title: str) -> str:
+    if not title:
+        return "Без названия"
+    cleaned = title.strip()
+    return cleaned[:1].upper() + cleaned[1:]
+
+
+def _safe_json_loads(raw: str):
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Убираем возможные обёртки ```json ... ```
+        cleaned = re.sub(r"```json|```", "", raw).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return None
+
+
+def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, list[str]]:
+    warnings: list[str] = []
+    today, _ = _today_with_weekday()
+
+    if not parsed or not isinstance(parsed, dict):
+        return False, None, ["Модель вернула невалидный JSON"]
+
+    title = _normalize_title(parsed.get("title"))
+    date_str = parsed.get("date")
+    time_str = parsed.get("time")
+    category = parsed.get("category")
+    priority = parsed.get("priority")
+
+    if category not in CATEGORIES:
+        warnings.append("Категория заменена на 'Личное'")
+        category = "Личное"
+
+    if priority not in PRIORITIES:
+        warnings.append("Приоритет установлен по умолчанию (medium)")
+        priority = "medium"
+
+    parsed_date = None
+    was_date_parsed = False
+    if isinstance(date_str, str):
+        try:
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            was_date_parsed = True
+        except ValueError:
+            warnings.append("Дата не распознана, используется сегодняшняя")
+    else:
+        warnings.append("Дата не указана, используется сегодняшняя")
+
+    if not parsed_date:
+        parsed_date = today
+
+    if parsed_date < today:
+        warnings.append("Дата была в прошлом и сдвинута на сегодня")
+        parsed_date = today
+
+    parsed_time = None
+    has_time = False
+    if isinstance(time_str, str):
+        try:
+            parsed_time = datetime.strptime(time_str, "%H:%M").time()
+            has_time = True
+        except ValueError:
+            warnings.append("Время не распознано и сброшено")
+    elif time_str is not None:
+        warnings.append("Время имеет неверный формат, сброшено")
+
+    datetime_iso = None
+    if parsed_time:
+        datetime_iso = datetime.combine(parsed_date, parsed_time).isoformat()
+
+    processed_task = {
+        "title": title,
+        "description": f"Сгенерировано из заметки: '{original_text}'",
+        "date": parsed_date.isoformat(),
+        "time": parsed_time.strftime("%H:%M") if parsed_time else None,
+        "datetime_iso": datetime_iso,
+        "category": category,
+        "priority": priority,
+        "is_full_day_event": not bool(parsed_time),
+        "metadata": {
+            "ai_model": "GigaChat",
+            "has_time": has_time,
+            "was_date_parsed": was_date_parsed,
+            "confidence_score": None
+        }
+    }
+
+    return True, processed_task, warnings
+
+
+def extract_task_via_gigachat(user_text: str) -> dict:
+    base_response = {
+        "success": False,
+        "original_text": user_text,
+        "processed_task": None,
+        "warnings": []
+    }
+
+    token = get_token()
+    if not token:
+        base_response["error"] = "ИИ помощник не настроен"
+        return base_response
+
+    try:
+        prompt = _build_gigachat_prompt(user_text)
+        r = requests.post(
+            API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "GigaChat",
+                "messages": [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_text}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 300
+            },
+            verify=False,
+            timeout=20
+        )
+
+        if r.status_code != 200:
+            base_response["error"] = f"Ошибка API GigaChat (код {r.status_code})"
+            return base_response
+
+        response_data = r.json()
+        if "choices" not in response_data or not response_data["choices"]:
+            base_response["error"] = "Ошибка формата ответа GigaChat"
+            return base_response
+
+        raw_content = response_data["choices"][0]["message"].get("content", "")
+        parsed_json = _safe_json_loads(raw_content)
+        ok, processed_task, warnings = _validate_and_enrich(parsed_json, user_text)
+
+        base_response["success"] = ok
+        base_response["processed_task"] = processed_task
+        base_response["warnings"] = warnings
+
+        if not ok:
+            base_response["error"] = "Не удалось разобрать ответ модели"
+
+        return base_response
+    except Exception as exc:
+        base_response["error"] = f"Ошибка соединения с GigaChat: {exc}"
+        return base_response
 
 def get_free_slots_for_date(date, existing_events):
     """
@@ -266,55 +469,24 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
                     'content': f"Извините, на {target_date.strftime('%d.%m.%Y')} нет свободного времени для события '{description}'. Попробуйте выбрать другую дату."
                 }
 
-    # Если это не запрос на событие или нет доступа к БД, обращаемся к GigaChat
-    token = get_token()
-    if not token:
+    structured = extract_task_via_gigachat(message)
+    if structured.get("success"):
+        processed = structured["processed_task"] or {}
+        date_part = processed.get("date")
+        time_part = processed.get("time") or "время не указано"
+        title = processed.get("title", "Задача")
+        summary = f"Готово! '{title}' на {date_part} {time_part}. Категория: {processed.get('category')}. Приоритет: {processed.get('priority')}"
+        if structured.get("warnings"):
+            summary += "\nПредупреждения: " + "; ".join(structured["warnings"])
         return {
-            'type': 'text',
-            'content': "ИИ помощник не настроен. Создайте файл .env с GIGACHAT_AUTHORIZATION_KEY (см. GIGACHAT_SETUP.txt)"
+            'type': 'structured_task',
+            'content': summary,
+            'structured': structured
         }
 
-    try:
-        r = requests.post(
-            API_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "GigaChat",
-                "messages": [
-                    {"role": "system", "content": "Ты — Помняша, ИИ помощник-планировщик. Помогаешь с организацией времени и планированием задач."},
-                    {"role": "user", "content": message}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 500
-            },
-            verify=False,
-            timeout=20
-        )
-
-        if r.status_code != 200:
-            TOKEN_CACHE = None
-            return {
-                'type': 'text',
-                'content': f"Ошибка API GigaChat (код {r.status_code})"
-            }
-
-        response_data = r.json()
-        if "choices" not in response_data or not response_data["choices"]:
-            return {
-                'type': 'text',
-                'content': "Ошибка формата ответа GigaChat"
-            }
-
-        return {
-            'type': 'text',
-            'content': response_data["choices"][0]["message"]["content"]
-        }
-
-    except Exception as e:
-        return {
-            'type': 'text',
-            'content': f"Ошибка соединения с GigaChat: {str(e)}"
-        }
+    error_msg = structured.get("error") or "Не удалось обработать запрос"
+    return {
+        'type': 'text',
+        'content': error_msg,
+        'structured': structured
+    }
