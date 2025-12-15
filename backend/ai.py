@@ -147,16 +147,45 @@ def _normalize_title(title: str) -> str:
     return cleaned[:1].upper() + cleaned[1:]
 
 
-def _safe_json_loads(raw: str):
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Убираем возможные обёртки ```json ... ```
-        cleaned = re.sub(r"```json|```", "", raw).strip()
+def _safe_json_loads(raw):
+    """
+    Пытается безопасно распарсить JSON из ответа модели,
+    даже если вокруг есть пояснительный текст или обёртки.
+    """
+    def _unwrap_collection(value):
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            return value[0]
+        return value
+
+    unwrapped = _unwrap_collection(raw)
+    if isinstance(unwrapped, dict):
+        return unwrapped
+
+    if not isinstance(raw, str):
+        return None
+
+    candidates = [raw, re.sub(r"```json|```", "", raw).strip()]
+
+    decoder = json.JSONDecoder()
+
+    for candidate in candidates:
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(candidate)
+            return _unwrap_collection(parsed)
         except json.JSONDecodeError:
-            return None
+            pass
+
+        brace_index = candidate.find("{")
+        while brace_index != -1:
+            try:
+                obj, _ = decoder.raw_decode(candidate[brace_index:])
+                return _unwrap_collection(obj)
+            except json.JSONDecodeError:
+                brace_index = candidate.find("{", brace_index + 1)
+
+    return None
 
 
 def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, list[str]]:
