@@ -152,16 +152,8 @@ def _safe_json_loads(raw):
     Пытается безопасно распарсить JSON из ответа модели,
     даже если вокруг есть пояснительный текст или обёртки.
     """
-    def _unwrap_collection(value):
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, list) and value and isinstance(value[0], dict):
-            return value[0]
-        return value
-
-    unwrapped = _unwrap_collection(raw)
-    if isinstance(unwrapped, dict):
-        return unwrapped
+    if isinstance(raw, dict):
+        return raw
 
     if not isinstance(raw, str):
         return None
@@ -172,8 +164,7 @@ def _safe_json_loads(raw):
 
     for candidate in candidates:
         try:
-            parsed = json.loads(candidate)
-            return _unwrap_collection(parsed)
+            return json.loads(candidate)
         except json.JSONDecodeError:
             pass
 
@@ -181,7 +172,7 @@ def _safe_json_loads(raw):
         while brace_index != -1:
             try:
                 obj, _ = decoder.raw_decode(candidate[brace_index:])
-                return _unwrap_collection(obj)
+                return obj
             except json.JSONDecodeError:
                 brace_index = candidate.find("{", brace_index + 1)
 
