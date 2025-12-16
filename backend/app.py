@@ -30,7 +30,7 @@ from backend.google_calendar import (
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request as GoogleRequest
 
-from backend.ai import ask_gigachat
+from backend.ai import ask_gigachat, auto_assign_category
 
 
 CLIENT_SECRETS_FILE = os.path.join("secrets", "client_secret.json")
@@ -230,7 +230,8 @@ def create_event(
             description=description,
             start_time=start,
             end_time=end,
-            source="local"
+            source="local",
+            view=auto_assign_category(title, description)
         )
 
         db.add(ev)
@@ -527,6 +528,26 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
     user_id, _ = _get_or_create_session(request)
     _persist_session(response, user_id)
 
+    # Автоматически присваиваем категории задачам без категорий
+    try:
+        events_without_category = db.query(Event).filter(
+            Event.user_id == user_id,
+            (Event.view.is_(None) | (Event.view == ""))
+        ).limit(10).all()  # Обрабатываем максимум 10 задач за раз
+
+        for event in events_without_category:
+            category = auto_assign_category(
+                event.title or "",
+                event.description or ""
+            )
+            event.view = category
+
+        if events_without_category:
+            db.commit()
+    except Exception:
+        # Игнорируем ошибки авто-присвоения категорий
+        db.rollback()
+
     # Если сообщение — короткое подтверждение (например: 'давай', 'ок', 'хорошо', 'да'),
     # и у нас есть отложенное предложение для этой сессии — сразу создаём событие.
     short_accepts = {'да', 'давай', 'ок', 'окей', 'хорошо', 'согласен', 'согласна'}
@@ -552,10 +573,36 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
                     return {"reply": {"type": "text", "content": "Не удалось определить дату для события."}}
 
                 if not time_str:
-                    # если времени нет — ставим 09:00 по умолчанию
-                    time_str = '09:00'
+                    # если времени нет — оставляем null, ИИ сам предложит оптимальное время
+                    time_str = None
 
-                event_datetime = datetime.fromisoformat(f"{date_str}T{time_str}")
+                # Создаем событие с правильным временем
+                if time_str:
+                    event_datetime = datetime.fromisoformat(f"{date_str}T{time_str}")
+                else:
+                    # Если время не указано, используем suggest_optimal_time
+                    from backend.ai import suggest_optimal_time
+                    from backend.database import Event
+
+                    # Получаем существующие события на эту дату для анализа
+                    existing_events = db_session.query(Event).filter(
+                        Event.user_id == user_id,
+                        Event.start_time >= datetime.combine(datetime.fromisoformat(date_str).date(), datetime.min.time()),
+                        Event.start_time < datetime.combine(datetime.fromisoformat(date_str).date() + timedelta(days=1), datetime.min.time())
+                    ).all()
+
+                    suggested_time = suggest_optimal_time(
+                        datetime.fromisoformat(date_str).date(),
+                        title,
+                        existing_events,
+                        processed.get('priority', 'medium')
+                    )
+
+                    if suggested_time:
+                        event_datetime = suggested_time
+                    else:
+                        # Fallback: используем 9:00 как последнее средство
+                        event_datetime = datetime.fromisoformat(f"{date_str}T09:00")
 
                 new_event = Event(
                     user_id=user_id,
@@ -563,7 +610,8 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
                     description=processed.get('description') or title,
                     start_time=event_datetime,
                     end_time=event_datetime,
-                    source="ai_assistant"
+                    source="ai_assistant",
+                    view=processed.get('category') or auto_assign_category(title, processed.get('description') or "")
                 )
 
                 db.add(new_event)
@@ -648,6 +696,53 @@ def save_assignments(data: Dict[str, Any], request: Request, response: Response,
         return {"status": "ok", "updated": updated}
     except Exception as e:
         return JSONResponse({"error": f"save_assignments failed: {e}"}, status_code=400)
+
+
+@app.post('/auto-assign-categories')
+def auto_assign_categories(request: Request, db: Session = Depends(get_db)):
+    """
+    Автоматически присваивает категории всем задачам пользователя, у которых нет категории.
+    Возвращает статистику обработанных задач.
+    """
+    try:
+        user_id, _ = _get_or_create_session(request)
+        _persist_session(Response(), user_id)
+
+        # Получаем все события пользователя без категории (view is None или пустая строка)
+        events_without_category = db.query(Event).filter(
+            Event.user_id == user_id,
+            (Event.view.is_(None) | (Event.view == ""))
+        ).all()
+
+        updated_count = 0
+        categories_assigned = {}
+
+        for event in events_without_category:
+            # Определяем категорию на основе названия и описания
+            category = auto_assign_category(
+                event.title or "",
+                event.description or ""
+            )
+
+            # Сохраняем категорию в поле view
+            event.view = category
+            updated_count += 1
+
+            # Считаем статистику
+            categories_assigned[category] = categories_assigned.get(category, 0) + 1
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Автоматически присвоено категорий: {updated_count} задач",
+            "updated_count": updated_count,
+            "categories_assigned": categories_assigned
+        }
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"error": f"auto_assign_categories failed: {e}"}, status_code=500)
 
 
 @app.get('/parse-failures')

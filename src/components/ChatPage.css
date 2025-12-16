@@ -340,3 +340,27 @@
   cursor: not-allowed;
   transform: none;
 }
+
+.other-time-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Montserrat', sans-serif;
+  background-color: #FFC107;
+  color: #333;
+}
+
+.other-time-btn:hover {
+  background-color: #FF8F00;
+  transform: translateY(-2px);
+}
+
+.other-time-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}

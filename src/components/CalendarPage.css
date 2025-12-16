@@ -326,6 +326,18 @@
   line-height: 1.2;
 }
 
+.event-preview-title {
+  font-size: 8px;
+  line-height: 1.1;
+  margin-bottom: 1px;
+}
+
+.event-preview-category {
+  font-size: 7px;
+  opacity: 0.8;
+  font-weight: 500;
+}
+
 .calendar-more-events {
   font-size: 9px;
   color: #573D27;
@@ -406,9 +418,18 @@
 .event-title {
   font-weight: 700;
   color: #573D27;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   font-size: 13px;
   word-wrap: break-word;
+}
+
+.event-category {
+  font-weight: 600;
+  color: #FF6B6B;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .event-description {

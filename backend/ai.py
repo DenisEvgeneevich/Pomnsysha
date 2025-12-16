@@ -22,6 +22,34 @@ TOKEN_CACHE = None
 CATEGORIES = ["Работа", "Учеба", "Личное", "Здоровье", "Покупки", "Встречи"]
 PRIORITIES = {"high", "medium", "low"}
 
+# Ключевые слова для автоматического определения категорий
+CATEGORY_KEYWORDS = {
+    "Работа": [
+        "работа", "проект", "встреча", "совещание", "бизнес", "офис", "коллеги", "начальник",
+        "отчет", "презентация", "дедлайн", "задача", "проект", "клиент", "контракт", "переговоры"
+    ],
+    "Учеба": [
+        "учеба", "урок", "экзамен", "лекция", "домашнее задание", "контрольная", "семинар",
+        "курс", "обучение", "школа", "университет", "студент", "преподаватель", "учитель"
+    ],
+    "Здоровье": [
+        "врач", "больница", "аптека", "здоровье", "мед", "прием", "осмотр", "анализ",
+        "спорт", "тренировка", "бег", "фитнес", "зал", "массаж", "стоматолог", "терапевт"
+    ],
+    "Покупки": [
+        "купить", "магазин", "покупки", "шопинг", "товары", "продукты", "супермаркет",
+        "аптека", "одежда", "еда", "заказать", "доставка"
+    ],
+    "Встречи": [
+        "встреча", "друг", "друзья", "семья", "родители", "дети", "поход", "кафе",
+        "кино", "театр", "концерт", "праздник", "день рождения", "свидание"
+    ],
+    "Личное": [
+        "личное", "дом", "быт", "уборка", "стирка", "ремонт", "счета", "платежи",
+        "документы", "паспорт", "банку", "почта", "звонок", "личный"
+    ]
+}
+
 # Функции для работы с календарем и анализом запросов
 def _today_with_weekday():
     now = datetime.now()
@@ -299,6 +327,48 @@ def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, 
     }
 
     return True, processed_task, warnings
+
+
+def is_task_request(message: str) -> bool:
+    """
+    Определяет, является ли сообщение запросом на создание задачи.
+    """
+    message = message.lower().strip()
+
+    # Приветствия и общие фразы - не задачи
+    greetings = ['привет', 'здравствуй', 'добрый день', 'добрый вечер', 'доброе утро', 'хай', 'hello', 'hi', 'hey']
+    if any(message.startswith(g) or message == g for g in greetings):
+        return False
+
+    # Короткие подтверждения - не задачи
+    short_confirmations = ['да', 'давай', 'ок', 'окей', 'хорошо', 'согласен', 'согласна', 'ладно', 'понятно', 'ясно']
+    if message in short_confirmations:
+        return False
+
+    # Вопросы - не задачи (но могут содержать запросы на информацию)
+    if any(word in message for word in ['что', 'как', 'когда', 'где', 'почему', 'зачем', 'кто', 'сколько']):
+        return False
+
+    # Слова, указывающие на задачу
+    task_indicators = [
+        'сделай', 'сделать', 'создай', 'создать', 'запланируй', 'запланировать',
+        'напомни', 'напомнить', 'добавь', 'добавить', 'поставь', 'поставить',
+        'нужно', 'надо', 'требуется', 'необходимо', 'обязательно',
+        'встреча', 'совещание', 'митинг', 'звонок', 'позвонить',
+        'купить', 'приобрести', 'заказать', 'забронировать'
+    ]
+
+    # Временные маркеры - указывают на задачу
+    time_indicators = [
+        'сегодня', 'завтра', 'послезавтра', 'через', 'в', 'во', 'к',
+        'утром', 'вечером', 'днем', 'ночью', 'утро', 'вечер', 'день', 'ночь'
+    ]
+
+    has_task_word = any(word in message for word in task_indicators)
+    has_time_word = any(word in message for word in time_indicators)
+
+    # Если есть слова задач ИЛИ слова времени - считаем задачей
+    return has_task_word or has_time_word
 
 
 def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> dict:
@@ -711,9 +781,44 @@ def get_free_slots_for_date(date, existing_events):
 
     return free_slots
 
-def suggest_optimal_time(date, description, existing_events):
+def auto_assign_category(title: str, description: str = "") -> str:
     """
-    Предлагает оптимальное время для события на основе занятости и типа события.
+    Автоматически определяет категорию задачи на основе её названия и описания.
+    Возвращает наиболее подходящую категорию из списка CATEGORIES.
+    """
+    # Объединяем заголовок и описание для анализа
+    text = f"{title} {description}".lower().strip()
+
+    if not text:
+        return "Личное"
+
+    # Считаем совпадения ключевых слов для каждой категории
+    scores = {}
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        score = 0
+        for keyword in keywords:
+            # Считаем количество вхождений ключевого слова
+            count = text.count(keyword.lower())
+            score += count
+            # Даем бонус за точное совпадение слов
+            if f" {keyword.lower()} " in f" {text} ":
+                score += 1
+        scores[category] = score
+
+    # Выбираем категорию с максимальным счетом
+    best_category = max(scores.items(), key=lambda x: x[1])
+
+    # Если счет равен 0, возвращаем "Личное" как категорию по умолчанию
+    if best_category[1] == 0:
+        return "Личное"
+
+    return best_category[0]
+
+
+def suggest_optimal_time(date, description, existing_events, priority="medium"):
+    """
+    Предлагает оптимальное время для события на основе занятости, типа события и приоритета.
+    Учитывает предпочтения пользователя и реальную загруженность дня.
     """
     free_slots = get_free_slots_for_date(date, existing_events)
 
@@ -723,38 +828,92 @@ def suggest_optimal_time(date, description, existing_events):
     # Анализируем тип события для выбора оптимального времени
     event_type = description.lower()
 
-    if any(word in event_type for word in ['встреча', 'совещание', 'митинг', 'meeting']):
-        # Для встреч предпочитаем утро или середину дня
-        preferred_slots = [slot for slot in free_slots if slot['duration_hours'] >= 1.0]
-        if preferred_slots:
-            # Выбираем слот в первой половине дня
-            morning_slots = [s for s in preferred_slots if s['start'].hour < 14]
-            if morning_slots:
-                return morning_slots[0]['start']
+    # Определяем категории и их предпочтительное время
+    time_preferences = {
+        'work': {
+            'preferred_hours': [9, 10, 11, 14, 15, 16],  # рабочие часы
+            'min_duration': 1.0,
+            'avoid_hours': [12, 13]  # обеденное время
+        },
+        'meeting': {
+            'preferred_hours': [9, 10, 11, 14, 15, 16],
+            'min_duration': 1.0,
+            'avoid_hours': [12, 13]
+        },
+        'lunch': {
+            'preferred_hours': [12, 13, 14],
+            'min_duration': 0.5,
+            'avoid_hours': []
+        },
+        'sport': {
+            'preferred_hours': [7, 8, 9, 18, 19, 20],  # утро или вечер
+            'min_duration': 1.0,
+            'avoid_hours': []
+        },
+        'health': {
+            'preferred_hours': [8, 9, 10, 17, 18, 19],
+            'min_duration': 0.5,
+            'avoid_hours': []
+        },
+        'shopping': {
+            'preferred_hours': [10, 11, 15, 16, 17, 18, 19],
+            'min_duration': 0.5,
+            'avoid_hours': [12, 13, 14]  # обед
+        },
+        'personal': {
+            'preferred_hours': [9, 10, 11, 14, 15, 16, 17, 18, 19],
+            'min_duration': 0.5,
+            'avoid_hours': []
+        }
+    }
+
+    # Определяем категорию события
+    category = 'personal'  # по умолчанию
+    if any(word in event_type for word in ['встреча', 'совещание', 'митинг', 'meeting', 'работа', 'проект', 'бизнес']):
+        category = 'work'
+    elif any(word in event_type for word in ['обед', 'перерыв', 'пауза', 'кушать', 'поесть']):
+        category = 'lunch'
+    elif any(word in event_type for word in ['спорт', 'тренировка', 'бег', 'фитнес', 'зал', 'пробежка']):
+        category = 'sport'
+    elif any(word in event_type for word in ['врач', 'больница', 'аптека', 'здоровье', 'мед']):
+        category = 'health'
+    elif any(word in event_type for word in ['купить', 'магазин', 'покупки', 'шопинг']):
+        category = 'shopping'
+
+    prefs = time_preferences[category]
+
+    # Фильтруем слоты по предпочтениям
+    preferred_slots = []
+    for slot in free_slots:
+        if slot['duration_hours'] >= prefs['min_duration']:
+            slot_hour = slot['start'].hour
+            if slot_hour in prefs['preferred_hours'] and slot_hour not in prefs['avoid_hours']:
+                preferred_slots.append(slot)
+
+    # Если есть предпочтительные слоты, выбираем лучший
+    if preferred_slots:
+        # Для высокого приоритета - выбираем самое раннее время
+        if priority == "high":
+            return min(preferred_slots, key=lambda x: x['start'])['start']
+        # Для низкого приоритета - выбираем более позднее время
+        elif priority == "low":
+            return max(preferred_slots, key=lambda x: x['start'])['start']
+        # Для среднего - выбираем оптимальное (не слишком рано, не слишком поздно)
+        else:
+            # Предпочитаем слоты в середине дня
+            midday_slots = [s for s in preferred_slots if 10 <= s['start'].hour <= 16]
+            if midday_slots:
+                return min(midday_slots, key=lambda x: x['start'])['start']
             return preferred_slots[0]['start']
 
-    elif any(word in event_type for word in ['обед', 'перерыв', 'пауза']):
-        # Для обедов - время обеда
-        lunch_slots = [slot for slot in free_slots
-                      if 12 <= slot['start'].hour <= 15 and slot['duration_hours'] >= 1.0]
-        if lunch_slots:
-            return lunch_slots[0]['start']
-
-    elif any(word in event_type for word in ['спорт', 'тренировка', 'бег']):
-        # Для спорта - вечер или утро
-        evening_slots = [slot for slot in free_slots
-                        if slot['start'].hour >= 17 and slot['duration_hours'] >= 1.0]
-        morning_slots = [slot for slot in free_slots
-                        if 7 <= slot['start'].hour <= 10 and slot['duration_hours'] >= 1.0]
-        if evening_slots:
-            return evening_slots[0]['start']
-        elif morning_slots:
-            return morning_slots[0]['start']
-
-    # Для остальных событий - просто первый доступный слот достаточной длительности
-    suitable_slots = [slot for slot in free_slots if slot['duration_hours'] >= 0.5]
+    # Если нет предпочтительных слотов, берем первый доступный
+    suitable_slots = [slot for slot in free_slots if slot['duration_hours'] >= prefs['min_duration']]
     if suitable_slots:
         return suitable_slots[0]['start']
+
+    # Если совсем ничего нет, берем любой слот
+    if free_slots:
+        return free_slots[0]['start']
 
     return None
 
@@ -826,38 +985,43 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
 
     # Сначала проверяем, является ли сообщение запросом на создание события
     if db_session and user_id:
-        event_request = parse_event_request(message)
-        if event_request:
-            # Это запрос на создание события
-            target_date = event_request['date']
-            description = event_request['description']
+        # Проверяем, является ли сообщение задачей
+        if not is_task_request(message):
+            # Это не задача - переходим к обычному чату
+            pass  # код ниже обработает как обычный чат
+        else:
+            event_request = parse_event_request(message)
+            if event_request:
+                # Это запрос на создание события
+                target_date = event_request['date']
+                description = event_request['description']
 
-            # Получаем существующие события на эту дату
-            from backend.database import Event
-            existing_events = db_session.query(Event).filter(
-                Event.user_id == user_id,
-                Event.start_time >= datetime.combine(target_date, datetime.min.time()),
-                Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
-            ).all()
+                # Получаем существующие события на эту дату
+                from backend.database import Event
+                existing_events = db_session.query(Event).filter(
+                    Event.user_id == user_id,
+                    Event.start_time >= datetime.combine(target_date, datetime.min.time()),
+                    Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+                ).all()
 
-            # Предлагаем оптимальное время
-            suggested_time = suggest_optimal_time(target_date, description, existing_events)
+                # Предлагаем оптимальное время
+                suggested_time = suggest_optimal_time(target_date, description, existing_events)
 
-            if suggested_time:
-                return {
-                    'type': 'event_suggestion',
-                    'data': {
-                        'date': target_date,
-                        'description': description,
-                        'suggested_time': suggested_time,
-                        'free_slots_count': len(get_free_slots_for_date(target_date, existing_events))
+                if suggested_time:
+                    return {
+                        'type': 'event_suggestion',
+                        'data': {
+                            'date': target_date,
+                            'description': description,
+                            'suggested_time': suggested_time,
+                            'free_slots_count': len(get_free_slots_for_date(target_date, existing_events))
+                        }
                     }
-                }
-            else:
-                return {
-                    'type': 'text',
-                    'content': f"Извините, на {target_date.strftime('%d.%m.%Y')} нет свободного времени для события '{description}'. Попробуйте выбрать другую дату."
-                }
+                else:
+                    return {
+                        'type': 'text',
+                        'content': f"Извините, на {target_date.strftime('%d.%m.%Y')} нет свободного времени для события '{description}'. Попробуйте выбрать другую дату."
+                    }
 
     # Если есть сессия БД — передаём существующие таски в модель как контекст
     existing_tasks = None
@@ -878,6 +1042,46 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
         except Exception:
             existing_tasks = None
 
+    # Проверяем, является ли сообщение задачей
+    if not is_task_request(message):
+        # Это обычное сообщение - переходим к чат-режиму
+        try:
+            # Импортируем клиент устойчиво: сначала пробуем пакет, затем модуль
+            try:
+                from backend.ai_client import post_conversation
+            except Exception:
+                from ai_client import post_conversation
+
+            conv = post_conversation(message)
+            if conv.get('success') and conv.get('raw'):
+                # Возвращаем текстовый ответ модели (чат-режим)
+                return {
+                    'success': True,
+                    'original_text': message,
+                    'processed_task': None,
+                    'warnings': [],
+                    'type': 'text',
+                    'content': conv.get('raw')
+                }
+            else:
+                return {
+                    'success': True,
+                    'original_text': message,
+                    'processed_task': None,
+                    'warnings': [],
+                    'type': 'text',
+                    'content': 'Извините, я не смог обработать ваш запрос. Попробуйте переформулировать.'
+                }
+        except Exception as e:
+            return {
+                'success': True,
+                'original_text': message,
+                'processed_task': None,
+                'warnings': [],
+                'type': 'text',
+                'content': 'Произошла ошибка при обработке сообщения.'
+            }
+
     structured = extract_task_via_gigachat(message, existing_tasks=existing_tasks)
 
     # Если модель вернула удачно распознанную задачу — предложим пользователю подтверждение
@@ -892,10 +1096,11 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
                 from datetime import datetime as _dt
                 date_str = processed.get('date')
                 desc = processed.get('title') or processed.get('description') or ''
+                priority = processed.get('priority', 'medium')
                 if date_str:
                     date_obj = _dt.fromisoformat(date_str).date()
                     # используем локальную функцию suggest_optimal_time
-                    suggested = suggest_optimal_time(date_obj, desc, evs if 'evs' in locals() else [])
+                    suggested = suggest_optimal_time(date_obj, desc, evs if 'evs' in locals() else [], priority)
                     if suggested:
                         suggested_time = suggested.strftime('%H:%M')
         except Exception:

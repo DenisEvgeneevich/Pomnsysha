@@ -38,7 +38,8 @@ const ChatPage = ({ onBack }) => {
     }
 
     const data = await response.json();
-    return data.reply;
+    // Возвращаем либо `reply`, либо сам объект ответа — это безопаснее
+    return data.reply ?? data;
   };
 
   const confirmEventCreation = async (eventData) => {
@@ -58,6 +59,29 @@ const ChatPage = ({ onBack }) => {
       return data;
     } catch (error) {
       throw new Error(`Ошибка создания события: ${error.message}`);
+    }
+  };
+
+  const formatDateLocal = (d) => {
+    try {
+      const dt = new Date(d);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    } catch (e) {
+      return d;
+    }
+  };
+
+  const formatTimeLocal = (d) => {
+    try {
+      const dt = new Date(d);
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const mm = String(dt.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    } catch (e) {
+      return d;
     }
   };
 
@@ -81,34 +105,59 @@ const ChatPage = ({ onBack }) => {
 
       let botMsg;
 
-      if (botResponse.type === 'event_suggestion') {
-        // Специальный формат для предложения события
-        const eventData = botResponse.data;
-        const suggestedTime = new Date(eventData.suggested_time);
+      // Нормализуем ответ модели
+      const respType = (botResponse && typeof botResponse === 'object' && botResponse.type) || (typeof botResponse === 'string' ? 'text' : 'text');
+      const respContent = (botResponse && typeof botResponse === 'object')
+        ? (botResponse.content ?? botResponse.reply ?? botResponse.text ?? JSON.stringify(botResponse))
+        : botResponse;
+
+      if (respType === 'event_suggestion' || respType === 'event' || (botResponse && botResponse.data && botResponse.data.suggested_time)) {
+        const eventData = (botResponse && botResponse.data) || {};
+        const dateVal = eventData.date ? (typeof eventData.date === 'string' ? new Date(eventData.date) : eventData.date) : null;
+        const suggested = eventData.suggested_time ? (typeof eventData.suggested_time === 'string' ? new Date(eventData.suggested_time) : eventData.suggested_time) : null;
+
+        const dateDisplay = dateVal ? dateVal.toLocaleDateString('ru-RU') : (eventData.date || '');
+        const suggestedTimeDisplay = suggested ? suggested.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : (eventData.suggested_time || '');
 
         botMsg = {
           id: Date.now() + 1,
-          text: `Предлагаю добавить событие "${eventData.description}" на ${eventData.date.toLocaleDateString('ru-RU')} в ${suggestedTime.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}.\n\nСвободных слотов на эту дату: ${eventData.free_slots_count}`,
+          text: `Предлагаю добавить событие "${eventData.description ?? eventData.title ?? respContent}" на ${dateDisplay} в ${suggestedTimeDisplay}.\n\nСвободных слотов на эту дату: ${eventData.free_slots_count ?? ''}`,
           isUser: false,
           timestamp: new Date(),
           eventSuggestion: {
-            date: eventData.date,
-            time: suggestedTime.toISOString().split('T')[1].slice(0, 5), // HH:MM format
-            description: eventData.description,
-            suggestedTime: suggestedTime
+            date: eventData.date ?? (dateVal ? formatDateLocal(dateVal) : null),
+            time: suggested ? formatTimeLocal(suggested) : (typeof eventData.suggested_time === 'string' ? eventData.suggested_time : null),
+            description: eventData.description ?? eventData.title ?? respContent,
+            suggestedTime: suggested || null,
+            showOtherTimeInput: false,
+            otherTimeValue: ''
           }
         };
       } else {
-        // Обычный текстовый ответ
         botMsg = {
           id: Date.now() + 1,
-          text: botResponse.content || botResponse,
+          text: typeof respContent === 'string' ? respContent : JSON.stringify(respContent),
           isUser: false,
           timestamp: new Date()
         };
       }
 
       setMessages(prev => [...prev, botMsg]);
+
+      // Если модель прислала назначения `assignments`, попробуем сохранить их в бэкенд
+      try {
+        const assignments = (botResponse && (botResponse.assignments || (botResponse.structured && botResponse.structured.assignments))) || null;
+        if (assignments && typeof assignments === 'object') {
+          fetch(`${API_URL}/assignments`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assignments })
+          }).catch(() => null);
+        }
+      } catch (e) {
+        // ignore
+      }
     } catch (error) {
       const errMsg = {
         id: Date.now() + 1,
@@ -198,14 +247,14 @@ const ChatPage = ({ onBack }) => {
                 <div className="event-confirmation">
                   <div className="event-details">
                     <strong>📅 {m.eventSuggestion.description}</strong><br/>
-                    📆 {new Date(m.eventSuggestion.date).toLocaleDateString('ru-RU')}<br/>
-                    🕐 {m.eventSuggestion.suggestedTime.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}
+                    📆 {m.eventSuggestion.date ? new Date(m.eventSuggestion.date).toLocaleDateString('ru-RU') : ''}<br/>
+                    🕐 {m.eventSuggestion.time}
                   </div>
                   <div className="event-actions">
                     <button
                       className="confirm-btn"
                       onClick={() => handleConfirmEvent(m.id, {
-                        date: m.eventSuggestion.date.split('T')[0], // YYYY-MM-DD
+                        date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
                         time: m.eventSuggestion.time, // HH:MM
                         description: m.eventSuggestion.description
                       })}
@@ -220,7 +269,67 @@ const ChatPage = ({ onBack }) => {
                     >
                       ❌ Отмена
                     </button>
+                    <button
+                      className="other-time-btn"
+                      onClick={async () => {
+                        // Запросим альтернативные времена у бэкенда
+                        try {
+                          const res = await fetch(`${API_URL}/suggest-times`, {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ date: m.eventSuggestion.date, description: m.eventSuggestion.description, count: 5 })
+                          });
+                          if (!res.ok) throw new Error('Ошибка получения слотов');
+                          const body = await res.json();
+                          const times = Array.isArray(body.times) ? body.times : [];
+                          if (times.length > 0) {
+                            setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, alternatives: times, showOtherTimeInput: false } } : msg));
+                          } else {
+                            // показать инпут как fallback
+                            setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, showOtherTimeInput: true } } : msg));
+                          }
+                        } catch (e) {
+                          // fallback: показать ручной ввод
+                          setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, showOtherTimeInput: true } } : msg));
+                        }
+                      }}
+                      disabled={isLoading}
+                    >
+                      🕘 Другое время
+                    </button>
                   </div>
+                  {m.eventSuggestion.alternatives && (
+                    <div className="other-time-alternatives">
+                      {m.eventSuggestion.alternatives.map((t, idx) => (
+                        <button key={idx} onClick={() => handleConfirmEvent(m.id, { date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date, time: t, description: m.eventSuggestion.description })}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {m.eventSuggestion.showOtherTimeInput && (
+                    <div className="other-time-input">
+                      <input
+                        type="time"
+                        value={m.eventSuggestion.otherTimeValue || ''}
+                        onChange={(e) => setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, otherTimeValue: e.target.value } } : msg))}
+                      />
+                      <button
+                        onClick={() => {
+                          const chosen = m.eventSuggestion.otherTimeValue;
+                          if (!chosen) return;
+                          handleConfirmEvent(m.id, {
+                            date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
+                            time: chosen,
+                            description: m.eventSuggestion.description
+                          });
+                        }}
+                      >
+                        Подтвердить время
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

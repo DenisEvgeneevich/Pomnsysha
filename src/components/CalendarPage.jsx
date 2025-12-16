@@ -207,7 +207,8 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
                       <div className="calendar-day-events">
                         {item.events.slice(0, 3).map((ev, idx) => (
                           <div key={idx} className="calendar-event-preview">
-                            {ev.title}
+                            <div className="event-preview-title">{ev.title}</div>
+                            {ev.view && <div className="event-preview-category">{ev.view}</div>}
                           </div>
                         ))}
                         {item.events.length > 3 && (
@@ -239,6 +240,9 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
 
                   <div className="event-details">
                     <div className="event-title">{ev.title}</div>
+                    {ev.view && (
+                      <div className="event-category">{ev.view}</div>
+                    )}
                     {ev.description && (
                       <div className="event-description">{ev.description}</div>
                     )}
