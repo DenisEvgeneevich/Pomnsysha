@@ -65,9 +65,10 @@ def upsert_google_event(user_id: int, event: Event) -> Optional[str]:
     if event.external_id:
         ok = _update_google_event_raw(user_id, event.external_id, body)
         if ok:
-            return None
+            return event.external_id  # Возвращаем существующий ID при успешном обновлении
 
-    return create_google_event(
+    # Создаем новое событие в Google Calendar
+    gid = create_google_event(
         user_id,
         {
             "title": event.title,
@@ -76,6 +77,7 @@ def upsert_google_event(user_id: int, event: Event) -> Optional[str]:
             "end": event.end_time.isoformat(),
         }
     )
+    return gid
 
 
 def delete_google_event(user_id: int, event: Event):
@@ -175,16 +177,49 @@ def sync_google_calendar(user_id: int):
                 if changed:
                     db.add(local)
 
-        local_events = db.scalars(
+        # Удаляем только те события, которые были синхронизированы из Google Calendar,
+        # но больше не существуют там. Локальные события без external_id не трогаем.
+        local_events_with_external_id = db.scalars(
             select(Event).where(
                 Event.user_id == user_id,
                 Event.external_id.is_not(None)
             )
         ).all()
 
-        for e in local_events:
+        for e in local_events_with_external_id:
             if e.external_id not in google_ids:
                 db.delete(e)
+        
+        # Теперь создаем события в Google Calendar для локальных событий без external_id
+        local_events_without_external_id = db.scalars(
+            select(Event).where(
+                Event.user_id == user_id,
+                Event.external_id.is_(None)
+            )
+        ).all()
+        
+        for e in local_events_without_external_id:
+            # Пропускаем события, которые были только что созданы и еще не синхронизированы
+            # (они будут синхронизированы отдельно через upsert_google_event)
+            if e.source == "google":
+                continue
+                
+            try:
+                gid = create_google_event(
+                    user_id,
+                    {
+                        "title": e.title,
+                        "description": e.description or "",
+                        "start": e.start_time.isoformat(),
+                        "end": e.end_time.isoformat(),
+                    }
+                )
+                if gid:
+                    e.external_id = gid
+                    e.source = "google"
+                    db.add(e)
+            except Exception as ex:
+                print(f"[sync] Ошибка создания события {e.id} в Google Calendar: {ex}")
 
         db.commit()
         print("[sync] Google sync OK")

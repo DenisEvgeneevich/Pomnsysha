@@ -662,11 +662,21 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
                 db.commit()
                 db.refresh(new_event)
 
-                # обновим google, если нужно
+                # Создаем событие в Google Calendar
+                try:
+                    gid = upsert_google_event(user_id, new_event)
+                    if gid:
+                        new_event.external_id = gid
+                        new_event.source = "google"
+                        db.commit()
+                except Exception as e:
+                    print(f"Ошибка создания события в Google Calendar: {e}")
+
+                # Синхронизируем с Google Calendar
                 try:
                     sync_google_calendar(user_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Ошибка синхронизации с Google Calendar: {e}")
 
                 # удалим отложенное предложение
                 try:
@@ -866,7 +876,17 @@ def confirm_event(data: Dict[str, Any], request: Request, response: Response, db
         db.commit()
         db.refresh(new_event)
 
-        # Синхронизируем с Google Calendar
+        # Создаем событие в Google Calendar
+        try:
+            gid = upsert_google_event(user_id, new_event)
+            if gid:
+                new_event.external_id = gid
+                new_event.source = "google"
+                db.commit()
+        except Exception as e:
+            print(f"Ошибка создания события в Google Calendar: {e}")
+
+        # Синхронизируем с Google Calendar (для обновления других событий)
         try:
             sync_google_calendar(user_id)
         except Exception as e:
