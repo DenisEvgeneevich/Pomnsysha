@@ -15,3 +15,4 @@ GIGACHAT_AUTHORIZATION_KEY=ваш_ключ_авторизации_здесь
 Пример:
 GIGACHAT_AUTHORIZATION_KEY=ABC123...xyz789
 
+

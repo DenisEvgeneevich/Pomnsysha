@@ -6,7 +6,7 @@ from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from database import engine, Event, get_user_creds
+from backend.database import engine, Event, get_user_creds
 
 TIMEZONE = "Europe/Moscow"
 

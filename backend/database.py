@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 from datetime import datetime 
@@ -8,7 +10,6 @@ from sqlalchemy.orm import (
     declarative_base, sessionmaker, relationship, Session, Mapped, mapped_column
 )
 from sqlalchemy.sql import func
-from google.oauth2.credentials import Credentials
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,6 +49,7 @@ class Event(Base):
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[str] = mapped_column(String(50), default="local")
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    view: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     user = relationship("User", back_populates="events")
 
@@ -72,9 +74,42 @@ def get_db():
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    # Ensure `view` column exists for older databases (simple migration)
+    ensure_view_column()
+
+
+def ensure_view_column():
+    """
+    Простая попытка добавить колонку `view` в таблицу `events`, если её ещё нет.
+    Работает для sqlite и других БД через простую ALTER TABLE.
+    """
+    try:
+        with engine.begin() as conn:
+            # Проверим, есть ли колонка view
+            res = conn.execute(text("PRAGMA table_info('events')")).fetchall()
+            cols = [r[1] for r in res] if res else []
+            if 'view' in cols:
+                return
+
+            # sqlite: простой ALTER TABLE ADD COLUMN
+            if engine.url.drivername.startswith('sqlite'):
+                conn.execute(text("ALTER TABLE events ADD COLUMN view VARCHAR(50)"))
+            else:
+                # Универсальная попытка
+                conn.execute(text("ALTER TABLE events ADD COLUMN view VARCHAR(50) NULL"))
+    except Exception:
+        # Не фатализируем ошибку миграции здесь — пользователь может запустить миграцию вручную
+        pass
 
 
 def get_user_creds(user_id: int) -> Credentials | None:
+    # Импортируем Credentials локально, чтобы приложение могло запускаться
+    # даже если пакет google не установлен.
+    try:
+        from google.oauth2.credentials import Credentials
+    except Exception:
+        Credentials = None  # type: ignore
+
     with engine.begin() as conn:
         row = conn.execute(
             text("""
@@ -85,6 +120,9 @@ def get_user_creds(user_id: int) -> Credentials | None:
         ).fetchone()
 
     if not row:
+        return None
+
+    if Credentials is None:
         return None
 
     return Credentials.from_authorized_user_info(json.loads(row[0]))
@@ -110,3 +148,4 @@ def save_user_creds(user_id: int, creds: Credentials):
                 """),
                 {"u": user_id, "t": token_json}
             )
+    
