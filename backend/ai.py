@@ -817,6 +817,17 @@ def suggest_optimal_time(date, description, existing_events, priority: str = "me
     Предлагает *конкретное время* начала события внутри свободных слотов.
     Не возвращает 09:00 по умолчанию, а подбирает час в пределах свободного окна.
     """
+    return suggest_optimal_time_with_exclusions(date, description, existing_events, priority, [])
+
+
+def suggest_optimal_time_with_exclusions(date, description, existing_events, priority: str = "medium", exclude_times: list = None):
+    """
+    Предлагает оптимальное время с учетом уже предложенных времен (exclude_times).
+    Анализирует занятость более точно, учитывая длительность событий и перерывы между ними.
+    """
+    if exclude_times is None:
+        exclude_times = []
+    
     free_slots = get_free_slots_for_date(date, existing_events)
     if not free_slots:
         return None
@@ -849,31 +860,61 @@ def suggest_optimal_time(date, description, existing_events, priority: str = "me
 
     preferred_hours = time_prefs_by_category[category]
 
+    # Преобразуем exclude_times в datetime для сравнения
+    exclude_datetimes = []
+    for time_str in exclude_times:
+        try:
+            if isinstance(time_str, str) and ':' in time_str:
+                hour, minute = map(int, time_str.split(':'))
+                exclude_datetimes.append(datetime.combine(date, datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M").time()))
+        except Exception:
+            pass
+
     # Строим список всех допустимых кандидатов времени (datetime) внутри свободных слотов
+    # Учитываем не только предпочтительные часы, но и все доступные времена с шагом 30 минут
     candidates = []
+    
+    # Сначала пробуем предпочтительные часы
     for slot in free_slots:
         start_hour = slot["start"].hour
         end_hour = slot["end"].hour
         for h in preferred_hours:
             if start_hour <= h < end_hour:
-                candidates.append(datetime.combine(date, datetime.strptime(f"{h:02d}:00", "%H:%M").time()))
-
-    # Если ничего из предпочтительных часов не подходит — возьмём середину первого слота
+                candidate = datetime.combine(date, datetime.strptime(f"{h:02d}:00", "%H:%M").time())
+                # Проверяем, что это время не в списке исключений
+                if not any(abs((candidate - excl).total_seconds()) < 1800 for excl in exclude_datetimes):
+                    candidates.append(candidate)
+    
+    # Если предпочтительные часы все исключены, генерируем варианты с шагом 30 минут
     if not candidates:
-        first_slot = free_slots[0]
-        mid_ts = first_slot["start"] + (first_slot["end"] - first_slot["start"]) / 2
-        return mid_ts
+        for slot in free_slots:
+            current = slot["start"]
+            while current < slot["end"]:
+                # Пропускаем исключенные времена
+                if not any(abs((current - excl).total_seconds()) < 1800 for excl in exclude_datetimes):
+                    candidates.append(current)
+                current += timedelta(minutes=30)
+                if len(candidates) >= 10:  # Ограничиваем количество кандидатов
+                    break
+            if len(candidates) >= 10:
+                break
+
+    # Если ничего не найдено, возвращаем None
+    if not candidates:
+        return None
 
     candidates.sort()
 
+    # Выбираем оптимальное время в зависимости от приоритета
     if priority == "high":
         return candidates[0]
     if priority == "low":
         return candidates[-1]
 
-    # Для среднего приоритета берём ближайшее к 15:00
+    # Для среднего приоритета берём ближайшее к 15:00, но не из исключенных
     target = datetime.combine(date, datetime.strptime("15:00", "%H:%M").time())
-    return min(candidates, key=lambda dt: abs(dt - target))
+    best = min(candidates, key=lambda dt: abs((dt - target).total_seconds()))
+    return best
 
 
 def get_token():

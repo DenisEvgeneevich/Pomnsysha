@@ -329,53 +329,52 @@ def do_sync(request: Request, response: Response):
 
 @app.post("/suggest-times")
 def suggest_times(data: Dict[str, Any], request: Request, response: Response, db: Session = Depends(get_db)):
-    """Возвращает список предложенных времён на заданную дату на основе свободных слотов.
+    """Возвращает новое оптимальное время от ИИ на основе анализа всех событий.
+    Учитывает уже предложенные времена, чтобы не повторяться.
 
-    Ожидает JSON: { date: "YYYY-MM-DD", description: "...", count?: int }
-    Возвращает: { times: ["HH:MM", ...] }
+    Ожидает JSON: { date: "YYYY-MM-DD", description: "...", priority?: "high|medium|low", exclude_times?: ["HH:MM", ...] }
+    Возвращает: { time: "HH:MM", message: "..." }
     """
     try:
         user_id, _ = _get_or_create_session(request)
         _persist_session(response, user_id)
 
         date_str = data.get("date")
+        description = data.get("description", "")
+        priority = data.get("priority", "medium")
+        exclude_times = data.get("exclude_times", [])  # Список уже предложенных времен
+        
         if not date_str:
             return JSONResponse({"error": "missing date"}, status_code=400)
 
         from datetime import datetime as _dt
         target_date = _dt.fromisoformat(date_str).date()
 
-        # Получаем существующие события на эту дату
-        from database import Event
+        # Получаем ВСЕ существующие события на эту дату
         existing_events = db.query(Event).filter(
             Event.user_id == user_id,
             Event.start_time >= datetime.combine(target_date, datetime.min.time()),
             Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
         ).all()
 
-        free_slots = []
-        try:
-            free_slots = get_free_slots_for_date(target_date, existing_events)
-        except Exception:
-            free_slots = []
+        # Используем ИИ для предложения оптимального времени с учетом исключений
+        from backend.ai import suggest_optimal_time_with_exclusions
+        suggested_time = suggest_optimal_time_with_exclusions(
+            target_date, 
+            description, 
+            existing_events, 
+            priority,
+            exclude_times
+        )
 
-        # Генерируем список предложенных времён (шаг 30 минут)
-        count = int(data.get("count", 5))
-        suggestions = []
-        for slot in free_slots:
-            start_dt = slot["start"]
-            dur_hours = slot["duration_hours"]
-            steps = max(1, int(dur_hours * 2))
-            for i in range(steps):
-                t = start_dt + timedelta(minutes=30 * i)
-                suggestions.append(t.strftime("%H:%M"))
-                if len(suggestions) >= count:
-                    break
-            if len(suggestions) >= count:
-                break
-
-        # Если нет слотов — вернуть пустой список
-        return {"times": suggestions}
+        if suggested_time:
+            time_str = suggested_time.strftime("%H:%M")
+            return {
+                "time": time_str,
+                "message": f"Предлагаю время {time_str} - это оптимальный слот с учетом всех ваших задач на этот день."
+            }
+        else:
+            return JSONResponse({"error": "Нет свободного времени на эту дату"}, status_code=400)
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -411,42 +410,41 @@ def get_stats(request: Request, response: Response, db: Session = Depends(get_db
                 'isMostBusy': tasks_count == max_tasks and tasks_count > 0
             })
 
-        # Категории задач (анализ по ключевым словам)
-        categories = {
-            'Работа': ['работа', 'проект', 'встреча', 'совещание', 'бизнес', 'офис'],
-            'Семья': ['семья', 'родители', 'дети', 'дом', 'ужин', 'завтрак'],
-            'Друзья': ['друзья', 'встреча с', 'поход', 'кафе', 'кино', 'театр'],
-            'Быт': ['покупки', 'магазин', 'уборка', 'стирка', 'ремонт', 'быт'],
-            'Спорт': ['спорт', 'тренировка', 'бег', 'фитнес', 'зал'],
-            'Учеба': ['учеба', 'урок', 'экзамен', 'лекция', 'домашнее задание']
-        }
-
-        category_stats = {cat: 0 for cat in categories.keys()}
-        other_count = 0
+        # Используем метки (view) из БД для статистики категорий
+        category_stats = {}
+        total_events = len(events)
 
         for event in events:
-            title_lower = (event.title or '').lower()
-            description_lower = (event.description or '').lower()
-            text = f"{title_lower} {description_lower}"
-
-            found_category = False
-            for category, keywords in categories.items():
-                if any(keyword in text for keyword in keywords):
-                    category_stats[category] += 1
-                    found_category = True
-                    break
-
-            if not found_category:
-                other_count += 1
+            # Используем поле view (метку) из БД
+            category = getattr(event, 'view', None) or 'Личное'
+            
+            # Если метки нет, пытаемся определить автоматически
+            if not category or category == '':
+                category = auto_assign_category(event.title or '', event.description or '')
+                # Сохраняем категорию в БД для будущего использования
+                try:
+                    event.view = category
+                except Exception:
+                    pass
+            
+            category_stats[category] = category_stats.get(category, 0) + 1
 
         # Преобразуем в формат для круговой диаграммы
-        total_events = len(events)
         if total_events > 0:
             pie_data = []
             colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE']
+            
+            # Сохраняем изменения категорий в БД
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
             color_index = 0
-            for category, count in category_stats.items():
+            # Сортируем категории по количеству (от большего к меньшему)
+            sorted_categories = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
+            
+            for category, count in sorted_categories:
                 if count > 0:
                     percentage = round((count / total_events) * 100)
                     pie_data.append({
@@ -455,14 +453,6 @@ def get_stats(request: Request, response: Response, db: Session = Depends(get_db
                         'color': colors[color_index % len(colors)]
                     })
                     color_index += 1
-
-            if other_count > 0:
-                percentage = round((other_count / total_events) * 100)
-                pie_data.append({
-                    'name': 'Другое',
-                    'value': percentage,
-                    'color': colors[color_index % len(colors)]
-                })
         else:
             pie_data = []
 
@@ -858,6 +848,9 @@ def confirm_event(data: Dict[str, Any], request: Request, response: Response, db
         except ValueError:
             return {"success": False, "message": "Неверный формат даты или времени"}
 
+        # Автоматически определяем категорию
+        category = auto_assign_category(description, description)
+        
         # Создаем событие
         new_event = Event(
             user_id=user_id,
@@ -865,7 +858,8 @@ def confirm_event(data: Dict[str, Any], request: Request, response: Response, db
             description=description,
             start_time=event_datetime,
             end_time=event_datetime,  # Для простоты, события без длительности
-            source="ai_assistant"
+            source="ai_assistant",
+            view=category
         )
 
         db.add(new_event)

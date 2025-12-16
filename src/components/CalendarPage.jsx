@@ -19,6 +19,8 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
     try {
       const response = await apiFetch('/events');
       const data = await response.json();
+      // Убеждаемся, что события имеют поле view
+      console.log("Загружены события:", data.map(e => ({ id: e.id, title: e.title, view: e.view })));
       setEvents(data);
     } catch (err) {
       console.error("Ошибка загрузки событий:", err);
@@ -93,7 +95,16 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
     const lastDay = new Date(year, month + 1, 0);
 
     const days = [];
-    for (let i = 0; i < firstDay.getDay(); i++) days.push(null);
+    // Календарь начинается с понедельника (0 = воскресенье, 1 = понедельник)
+    // Преобразуем: понедельник = 0, воскресенье = 6
+    let firstDayOfWeek = firstDay.getDay(); // 0 = воскресенье, 1 = понедельник, ..., 6 = суббота
+    if (firstDayOfWeek === 0) {
+      firstDayOfWeek = 6; // Воскресенье становится последним днем недели
+    } else {
+      firstDayOfWeek = firstDayOfWeek - 1; // Понедельник = 0, вторник = 1, ..., суббота = 5
+    }
+    
+    for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
 
     for (let d = 1; d <= lastDay.getDate(); d++) {
       const date = new Date(year, month, d);
@@ -119,7 +130,7 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
     'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
   ];
 
-  const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
   const selectedEvents = getSelectedEvents();
 

@@ -111,7 +111,30 @@ const ChatPage = ({ onBack }) => {
         ? (botResponse.content ?? botResponse.reply ?? botResponse.text ?? JSON.stringify(botResponse))
         : botResponse;
 
-      if (respType === 'event_suggestion' || respType === 'event' || (botResponse && botResponse.data && botResponse.data.suggested_time)) {
+      // Обработка proposal от ИИ
+      if (respType === 'proposal' && botResponse.structured && botResponse.structured.processed_task) {
+        const processed = botResponse.structured.processed_task;
+        const dateStr = processed.date;
+        const timeStr = processed.time || botResponse.suggested_time || null;
+        const title = processed.title || processed.description || 'Задача';
+        const category = processed.category || 'Личное';
+
+        botMsg = {
+          id: Date.now() + 1,
+          text: botResponse.content || `Предлагаю добавить: "${title}" на ${dateStr} ${timeStr || 'время не указано'}. Категория: ${category}`,
+          isUser: false,
+          timestamp: new Date(),
+          eventSuggestion: {
+            date: dateStr,
+            time: timeStr,
+            description: title,
+            category: category,
+            suggestedTime: timeStr || null,
+            showOtherTimeInput: false,
+            otherTimeValue: ''
+          }
+        };
+      } else if (respType === 'event_suggestion' || respType === 'event' || (botResponse && botResponse.data && botResponse.data.suggested_time)) {
         const eventData = (botResponse && botResponse.data) || {};
         const dateVal = eventData.date ? (typeof eventData.date === 'string' ? new Date(eventData.date) : eventData.date) : null;
         const suggested = eventData.suggested_time ? (typeof eventData.suggested_time === 'string' ? new Date(eventData.suggested_time) : eventData.suggested_time) : null;
@@ -272,26 +295,73 @@ const ChatPage = ({ onBack }) => {
                     <button
                       className="other-time-btn"
                       onClick={async () => {
-                        // Запросим альтернативные времена у бэкенда
+                        setIsLoading(true);
                         try {
+                          // Собираем все уже предложенные времена для исключения
+                          const excludeTimes = [];
+                          if (m.eventSuggestion.time) {
+                            excludeTimes.push(m.eventSuggestion.time);
+                          }
+                          if (m.eventSuggestion.previousTimes) {
+                            excludeTimes.push(...m.eventSuggestion.previousTimes);
+                          }
+                          
+                          // Запросим новое оптимальное время у ИИ
                           const res = await fetch(`${API_URL}/suggest-times`, {
                             method: 'POST',
                             credentials: 'include',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ date: m.eventSuggestion.date, description: m.eventSuggestion.description, count: 5 })
+                            body: JSON.stringify({ 
+                              date: m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date,
+                              description: m.eventSuggestion.description,
+                              priority: 'medium',
+                              exclude_times: excludeTimes
+                            })
                           });
-                          if (!res.ok) throw new Error('Ошибка получения слотов');
+                          
+                          if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error(errorData.error || 'Ошибка получения времени');
+                          }
+                          
                           const body = await res.json();
-                          const times = Array.isArray(body.times) ? body.times : [];
-                          if (times.length > 0) {
-                            setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, alternatives: times, showOtherTimeInput: false } } : msg));
-                          } else {
-                            // показать инпут как fallback
-                            setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, showOtherTimeInput: true } } : msg));
+                          const newTime = body.time;
+                          const message = body.message || `Предлагаю новое время: ${newTime}`;
+                          
+                          if (newTime) {
+                            // Сохраняем предыдущие времена
+                            const previousTimes = [
+                              ...(m.eventSuggestion.previousTimes || []),
+                              ...(m.eventSuggestion.time ? [m.eventSuggestion.time] : [])
+                            ];
+                            
+                            // Обновляем сообщение с новым временем
+                            setMessages(prev => prev.map(msg => 
+                              msg.id === m.id 
+                                ? { 
+                                    ...msg, 
+                                    eventSuggestion: { 
+                                      ...msg.eventSuggestion, 
+                                      time: newTime,
+                                      previousTimes: previousTimes,
+                                      newTimeProposed: true,
+                                      newTimeMessage: message
+                                    } 
+                                  } 
+                                : msg
+                            ));
                           }
                         } catch (e) {
-                          // fallback: показать ручной ввод
-                          setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, showOtherTimeInput: true } } : msg));
+                          // Показываем ошибку пользователю
+                          const errorMsg = {
+                            id: Date.now() + 1000,
+                            text: `⚠ ${e.message || 'Не удалось получить новое время'}`,
+                            isUser: false,
+                            timestamp: new Date()
+                          };
+                          setMessages(prev => [...prev, errorMsg]);
+                        } finally {
+                          setIsLoading(false);
                         }
                       }}
                       disabled={isLoading}
@@ -299,34 +369,22 @@ const ChatPage = ({ onBack }) => {
                       🕘 Другое время
                     </button>
                   </div>
-                  {m.eventSuggestion.alternatives && (
-                    <div className="other-time-alternatives">
-                      {m.eventSuggestion.alternatives.map((t, idx) => (
-                        <button key={idx} onClick={() => handleConfirmEvent(m.id, { date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date, time: t, description: m.eventSuggestion.description })}>
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {m.eventSuggestion.showOtherTimeInput && (
-                    <div className="other-time-input">
-                      <input
-                        type="time"
-                        value={m.eventSuggestion.otherTimeValue || ''}
-                        onChange={(e) => setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, eventSuggestion: { ...msg.eventSuggestion, otherTimeValue: e.target.value } } : msg))}
-                      />
+                  {m.eventSuggestion.newTimeProposed && m.eventSuggestion.newTimeMessage && (
+                    <div className="new-time-proposal">
+                      <div className="new-time-message">{m.eventSuggestion.newTimeMessage}</div>
+                      <div className="new-time-display">
+                        Новое время: <strong>{m.eventSuggestion.time}</strong>
+                      </div>
                       <button
-                        onClick={() => {
-                          const chosen = m.eventSuggestion.otherTimeValue;
-                          if (!chosen) return;
-                          handleConfirmEvent(m.id, {
-                            date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
-                            time: chosen,
-                            description: m.eventSuggestion.description
-                          });
-                        }}
+                        className="confirm-new-time-btn"
+                        onClick={() => handleConfirmEvent(m.id, {
+                          date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
+                          time: m.eventSuggestion.time,
+                          description: m.eventSuggestion.description
+                        })}
+                        disabled={isLoading}
                       >
-                        Подтвердить время
+                        ✅ Подтвердить новое время
                       </button>
                     </div>
                   )}
