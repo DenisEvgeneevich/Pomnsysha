@@ -31,7 +31,7 @@ label input[type='checkbox']{
     -webkit-appearance: none;
     width: 18px;
     height: 18px;
-    border: 2px solid #ccc;
+    border: 2px solid
     border-radius: 3px;
     background: white;
     cursor: pointer;
@@ -39,17 +39,97 @@ label input[type='checkbox']{
 }
 
 label input[type="checkbox"]:hover {
-    border-color: #888;
+    border-color:
 }
 
 label input[type="checkbox"]:checked {
-    border-color: #888;
-    background-color: #FFAE3E;
+    border-color:
+    background-color:
 }
 
 .container {
     max-width: 85vw;
     margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+    .container {
+        max-width: 95vw;
+    }
+
+    .main-todos {
+        width: 90vw;
+        padding: 40px 30px;
+        gap: 40px;
+    }
+
+    .main-hello {
+        font-size: 32px;
+    }
+
+    .main-title {
+        font-size: 24px;
+    }
+
+    .main-list {
+        padding: 30px 25px;
+    }
+
+    .main-btn {
+        padding: 15px 30px;
+        font-size: 18px;
+    }
+
+    .footer-icons-panel {
+        width: 100%;
+        gap: 25px;
+        padding: 5px 15px;
+    }
+
+    .icon-button {
+        width: 55px;
+        height: 55px;
+    }
+
+    .icon-button img {
+        width: 45px;
+        height: 45px;
+    }
+}
+
+@media (max-width: 480px) {
+    .main-todos {
+        width: 95vw;
+        padding: 30px 20px;
+        gap: 30px;
+    }
+
+    .main-hello {
+        font-size: 28px;
+    }
+
+    .main-title {
+        font-size: 20px;
+    }
+
+    .main-list {
+        padding: 20px 15px;
+    }
+
+    .footer-icons-panel {
+        gap: 15px;
+        padding: 5px 10px;
+    }
+
+    .icon-button {
+        width: 50px;
+        height: 50px;
+    }
+
+    .icon-button img {
+        width: 40px;
+        height: 40px;
+    }
 }
 
 .app-wrapper {
@@ -62,7 +142,7 @@ label input[type="checkbox"]:checked {
     display: flex;
     flex: 1 0 auto;
     width: 100%;
-    background-color: #FFAE3E;
+    background-color:
     padding: 0 0 20px 0;
     min-height: calc(100vh - 150px);
 }
@@ -77,22 +157,22 @@ label input[type="checkbox"]:checked {
     gap: 70px;
     border-radius: 25px;
     padding: 90px 80px;
-    background-color: #FFF9DA;
+    background-color:
 }
 
 .main-hello {
     font-size: 45px;
-    color: #573D27;
+    color:
 }
 
 .main-title {
     font-size: 30px;
-    color: #573D27;
+    color:
 }
 
 .main-list {
-    background-color: #FFFFFF;
-    color: #573D27;
+    background-color:
+    color:
     border-radius: 30px;
     padding: 60px 50px;
     display: flex;
@@ -113,15 +193,15 @@ label input[type="checkbox"]:checked {
 
 /* Стиль для зачёркнутых задач */
 .task-text[style*="line-through"] {
-  color: #888;
+  color:
   font-style: italic;
 }
 
 .main-btn {
     display: block;
     padding: 20px 40px;
-    background-color: #C18F64;
-    color: #FFF9DA;
+    background-color:
+    color:
     border: none;
     border-radius: 30px;
     font-weight: 600;
@@ -132,14 +212,14 @@ label input[type="checkbox"]:checked {
 }
 
 .main-btn:hover {
-    background-color: #f5e0e0;
-    color: #866346;
+    background-color:
+    color:
 }
 
 .footer {
   flex-shrink: 0;
-  background-color: #573D27;
-  color: #FFF9DA;
+  background-color:
+  color:
   padding: 20px 0;
   height: 90px;
   display: flex;
@@ -156,7 +236,7 @@ label input[type="checkbox"]:checked {
 }
 
 .footer-icons-panel {
-  background-color: #FFFFFF;
+  background-color:
   border-radius: 15px;
   padding: 5px 20px;
   width: 130%;
@@ -182,7 +262,6 @@ label input[type="checkbox"]:checked {
   position: relative;
 }
 
-
 .icon-button:hover {
   transform: scale(1.1);
 }
@@ -207,7 +286,7 @@ label input[type="checkbox"]:checked {
 }
 
 .google-auth-btn {
-  background: #573D27;
+  background:
   color: white;
   border: none;
   padding: 12px 20px;
@@ -220,17 +299,17 @@ label input[type="checkbox"]:checked {
 }
 
 .google-auth-btn:hover {
-  background: #C18F64;
+  background:
   transform: translateY(-2px);
 }
 
 .google-auth-btn.authenticated {
-  background: #34A853;
+  background:
 }
 
 .sync-toggle {
-  background: #FFAE3E;
-  color: #573D27;
+  background:
+  color:
   border: none;
   padding: 12px 20px;
   border-radius: 25px;
@@ -242,12 +321,12 @@ label input[type="checkbox"]:checked {
 }
 
 .sync-toggle:hover {
-  background: #FFC107;
+  background:
   transform: translateY(-2px);
 }
 
 .sync-toggle.syncing {
-  background: #4285F4;
+  background:
   color: white;
 }
 
@@ -258,11 +337,10 @@ label input[type="checkbox"]:checked {
     align-items: flex-end;
     gap: 10px;
   }
-  
+
   .google-auth-btn,
   .sync-toggle {
     padding: 10px 16px;
     font-size: 14px;
   }
 }
-

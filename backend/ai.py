@@ -22,7 +22,6 @@ TOKEN_CACHE = None
 CATEGORIES = ["Работа", "Учеба", "Личное", "Здоровье", "Покупки", "Встречи"]
 PRIORITIES = {"high", "medium", "low"}
 
-# Ключевые слова для автоматического определения категорий
 CATEGORY_KEYWORDS = {
     "Работа": [
         "работа", "проект", "встреча", "совещание", "бизнес", "офис", "коллеги", "начальник",
@@ -52,7 +51,6 @@ CATEGORY_KEYWORDS = {
     ],
 }
 
-# Функции для работы с календарем и анализом запросов
 def _today_with_weekday():
     now = datetime.now()
     weekdays = [
@@ -66,46 +64,14 @@ def _today_with_weekday():
     ]
     return now.date(), weekdays[now.weekday()]
 
-
 def _build_gigachat_prompt(user_text: str) -> str:
     today_date, weekday = _today_with_weekday()
-    return f"""
-Ты — интеллектуальный помощник для планирования. Твоя задача — анализировать короткие текстовые заметки пользователя на русском языке и извлекать из них структурированные данные для создания события в календаре.
-
-ПРАВИЛА АНАЛИЗА:
-1.  СЕГОДНЯШНЯЯ ДАТА: {today_date:%Y-%m-%d} ({weekday}). Все относительные даты ("завтра", "через неделю") вычисляй относительно неё.
-2.  НАЗВАНИЕ: Сформулируй краткое (3-7 слов), четкое и понятное название задачи или события на русском языке, используя ключевые слова из заметки. Убери мусорные слова ("надо", "не забыть").
-3.  ДАТА и ВРЕМЯ: Извлеки ВСЕ упоминания дат и времени. Если дата явно не указана, считай, что событие должно произойти СЕГОДНЯ. Если время не указано, укажи null.
-4.  КАТЕГОРИЯ: Выбери ОДНУ из: {CATEGORIES}. Определяй по контексту.
-5.  ПРИОРИТЕТ: Определи по тону и ключевым словам:
-    - "high" (высокий): если есть слова "срочно", "важно", "критично", "!!!", "очень надо".
-    - "medium" (средний): по умолчанию, для нейтральных поручений.
-    - "low" (низкий): если есть слова "не срочно", "когда будет время", "может быть".
-
-ФОРМАТ ОТВЕТА:
-Ты должен ответить ТОЛЬКО в виде JSON-объекта, строго по следующей схеме:
-{{
-  "title": "string",
-  "date": "YYYY-MM-DD",
-  "time": "HH:MM или null",
-  "category": "string из списка выше",
-  "priority": "high/medium/low"
-}}
-
-НИКАКОГО пояснительного текста, только JSON.
-
-ТЕКСТ ПОЛЬЗОВАТЕЛЯ ДЛЯ АНАЛИЗА: "{user_text}"
-"""
-
+    return f
 
 def parse_event_request(message: str) -> dict:
-    """
-    Анализирует сообщение пользователя на предмет запроса создания события.
-    Возвращает dict с распознанными параметрами или None если не найдено.
-    """
+    
     message = message.lower().strip()
 
-    # Паттерны для распознавания дат
     date_patterns = {
         'сегодня': 0,
         'завтра': 1,
@@ -116,32 +82,28 @@ def parse_event_request(message: str) -> dict:
         'через неделю': 7
     }
 
-    # Ищем дату в сообщении
     target_date = None
     for pattern, days_offset in date_patterns.items():
         if pattern in message:
             target_date = (datetime.now() + timedelta(days=days_offset)).date()
             break
 
-    # Ищем числовые даты (дд.мм, дд.мм.гггг)
     date_match = re.search(r'(\d{1,2})[.\-](\d{1,2})(?:[.\-](\d{2,4}))?', message)
     if date_match:
         day, month = int(date_match.group(1)), int(date_match.group(2))
         year = int(date_match.group(3)) if date_match.group(3) else datetime.now().year
 
-        # Корректируем год если нужно
         if year < 100:
             year += 2000
 
         try:
             target_date = datetime(year, month, day).date()
         except ValueError:
-            pass  # Неверная дата
+            pass
 
     if not target_date:
         return None
 
-    # Ищем время в сообщении (если указано)
     time_match = re.search(r'(\d{1,2})[:\.](\d{2})', message)
     requested_time = None
     if time_match:
@@ -151,16 +113,14 @@ def parse_event_request(message: str) -> dict:
         except ValueError:
             pass
 
-    # Ищем описание события (убираем слова о дате и времени)
     description = message
     for pattern in date_patterns.keys():
         description = description.replace(pattern, '')
 
-    description = re.sub(r'\d{1,2}[.\-:]\d{1,2}(?:[.\-]\d{2,4})?', '', description)  # Убираем даты
-    description = re.sub(r'\d{1,2}[:\.]\d{2}', '', description)  # Убираем время
-    description = re.sub(r'\s+', ' ', description).strip()  # Убираем лишние пробелы
+    description = re.sub(r'\d{1,2}[.\-:]\d{1,2}(?:[.\-]\d{2,4})?', '', description)
+    description = re.sub(r'\d{1,2}[:\.]\d{2}', '', description)
+    description = re.sub(r'\s+', ' ', description).strip()
 
-    # Убираем общие слова
     remove_words = ['поставь', 'создай', 'заплань', 'добавь', 'сделай', 'на', 'в', 'во', 'к', 'на', 'около']
     for word in remove_words:
         description = description.replace(f' {word} ', ' ')
@@ -173,15 +133,12 @@ def parse_event_request(message: str) -> dict:
         'description': description or 'Событие'
     }
 
-
 def _normalize_title(title: str) -> str:
     if not title:
         return "Без названия"
     cleaned = title.strip()
     return cleaned[:1].upper() + cleaned[1:]
 
-
-# Попробуем импортировать локальный парсер в разных контекстах (пакет или модуль)
 try:
     from backend.ai_parser import local_parse as local_ai_parse
 except Exception:
@@ -190,12 +147,8 @@ except Exception:
     except Exception:
         local_ai_parse = None
 
-
 def _safe_json_loads(raw):
-    """
-    Пытается безопасно распарсить JSON из ответа модели,
-    даже если вокруг есть пояснительный текст или обёртки.
-    """
+    
     if isinstance(raw, dict):
         return raw
 
@@ -207,7 +160,7 @@ def _safe_json_loads(raw):
     decoder = json.JSONDecoder()
 
     def _extract_by_braces(s: str):
-        """Попробовать найти JSON-объект по балансировке фигурных скобок."""
+        
         start = s.find("{")
         if start == -1:
             return None
@@ -222,13 +175,12 @@ def _safe_json_loads(raw):
         return None
 
     for candidate in candidates:
-        # Первый проход: стандартный json.loads
+
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
             pass
 
-        # Второй проход: попытка raw_decode от первого символа '{'
         brace_index = candidate.find("{")
         while brace_index != -1:
             try:
@@ -237,14 +189,13 @@ def _safe_json_loads(raw):
             except json.JSONDecodeError:
                 brace_index = candidate.find("{", brace_index + 1)
 
-        # Третий проход: извлечь сбалансированный фрагмент по скобкам и пробовать его
         try:
             fragment = _extract_by_braces(candidate)
             if fragment:
                 try:
                     return json.loads(fragment)
                 except json.JSONDecodeError:
-                    # Попробуем безопасно разобрать через ast.literal_eval (поддерживает одинарные кавычки)
+
                     try:
                         obj = ast.literal_eval(fragment)
                         if isinstance(obj, (dict, list)):
@@ -255,7 +206,6 @@ def _safe_json_loads(raw):
             pass
 
     return None
-
 
 def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, list[str]]:
     warnings: list[str] = []
@@ -330,28 +280,21 @@ def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, 
 
     return True, processed_task, warnings
 
-
 def is_task_request(message: str) -> bool:
-    """
-    Определяет, является ли сообщение запросом на создание задачи.
-    """
+    
     message = message.lower().strip()
 
-    # Приветствия и общие фразы - не задачи
     greetings = ['привет', 'здравствуй', 'добрый день', 'добрый вечер', 'доброе утро', 'хай', 'hello', 'hi', 'hey']
     if any(message.startswith(g) or message == g for g in greetings):
         return False
 
-    # Короткие подтверждения - не задачи
     short_confirmations = ['да', 'давай', 'ок', 'окей', 'хорошо', 'согласен', 'согласна', 'ладно', 'понятно', 'ясно']
     if message in short_confirmations:
         return False
 
-    # Вопросы - не задачи (но могут содержать запросы на информацию)
     if any(word in message for word in ['что', 'как', 'когда', 'где', 'почему', 'зачем', 'кто', 'сколько']):
         return False
 
-    # Слова, указывающие на задачу
     task_indicators = [
         'сделай', 'сделать', 'создай', 'создать', 'запланируй', 'запланировать',
         'напомни', 'напомнить', 'добавь', 'добавить', 'поставь', 'поставить',
@@ -360,7 +303,6 @@ def is_task_request(message: str) -> bool:
         'купить', 'приобрести', 'заказать', 'забронировать'
     ]
 
-    # Временные маркеры - указывают на задачу
     time_indicators = [
         'сегодня', 'завтра', 'послезавтра', 'через', 'в', 'во', 'к',
         'утром', 'вечером', 'днем', 'ночью', 'утро', 'вечер', 'день', 'ночь'
@@ -369,9 +311,7 @@ def is_task_request(message: str) -> bool:
     has_task_word = any(word in message for word in task_indicators)
     has_time_word = any(word in message for word in time_indicators)
 
-    # Если есть слова задач ИЛИ слова времени - считаем задачей
     return has_task_word or has_time_word
-
 
 def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> dict:
     base_response = {
@@ -381,7 +321,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         "warnings": []
     }
 
-    # Быстрый локальный фоллбек: сначала пытаемся локально распарсить задачу
     try:
         local_fallback_quick = None
         try:
@@ -420,10 +359,9 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
                 "warnings": ["Использован локальный парсер (instant, без ожидания сети)"],
             }
     except Exception:
-        # если локальный быстрый фоллбек упал, продолжаем обычный путь
+
         pass
 
-    # Быстрый canned-ответ для коротких приветствий — не ждём сеть
     try:
         txt_low = (user_text or "").strip().lower()
         if len(txt_low) <= 20 and re.match(r'^(прив|здрав|алло|ало|hi|hello|hey)\b', txt_low):
@@ -447,12 +385,10 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         except Exception:
             pass
 
-    # Обновим переменные окружения и ключ перед запросом токена —
-    # .env находится в `backend/.env`, поэтому явно подгружаем его.
     try:
         load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
     except Exception:
-        # fallback: обычный load_dotenv
+
         try:
             load_dotenv()
         except Exception:
@@ -469,8 +405,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         return base_response
 
     try:
-        # Построим prompt: сначала пробуем внешний билдер (backend.ai_prompt),
-        # который поддерживает передачу `existing_tasks`.
+
         prompt = None
         try:
             try:
@@ -479,7 +414,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
                 from ai_prompt import build_gigachat_prompt
             prompt = build_gigachat_prompt(user_text, existing_tasks=existing_tasks)
         except Exception:
-            # fallback: локальный билдер внутри этого модуля
+
             try:
                 prompt = _build_gigachat_prompt(user_text)
                 if existing_tasks:
@@ -523,7 +458,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
             except Exception:
                 pass
 
-        # Логируем медленные ответы в файл для последующего анализа
         try:
             if elapsed > 1.0:
                 snippet = None
@@ -557,7 +491,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         raw_content = response_data["choices"][0]["message"].get("content", "")
         parsed_json = _safe_json_loads(raw_content)
 
-        # Если модель явно указала, что это не задача — короткий путь для текстового ответа
         try:
             if isinstance(parsed_json, dict) and parsed_json.get('not_task'):
                 return {
@@ -570,9 +503,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         except Exception:
             pass
 
-        # Если парсинг не удался — попытаемся быстро "починить" ответ модели,
-        # вызвав специализированный короткий системный prompt, который вернёт
-        # ТОЛЬКО корректный JSON по нужной схеме.
         if parsed_json is None and raw_content:
             try:
                 try:
@@ -605,8 +535,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
 
         ok, processed_task, warnings = _validate_and_enrich(parsed_json, user_text)
 
-        # Если модель вернула невалидный JSON или валидация не прошла,
-        # сначала попробуем локальный парсер, затем — обычный чат-ответ.
         if not ok:
             local_fallback = None
             try:
@@ -615,7 +543,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
                 local_fallback = None
 
             if local_fallback:
-                # Построим обработанную задачу на основе локального парсера
+
                 lf_date = local_fallback.get('date')
                 lf_time = local_fallback.get('time')
                 datetime_iso = None
@@ -653,9 +581,9 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
                 except Exception:
                     pass
             else:
-                # Если локальный парсер не нашёл задачу — вернёмся к обычному чат-режиму
+
                 try:
-                    # Импортируем клиент устойчиво: сначала пробуем пакет, затем модуль
+
                     try:
                         from backend.ai_client import post_conversation
                     except Exception:
@@ -663,7 +591,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
 
                     conv = post_conversation(user_text)
                     if conv.get('success') and conv.get('raw'):
-                        # Возвращаем текстовый ответ модели (чат-режим)
+
                         return {
                             'success': True,
                             'original_text': user_text,
@@ -702,7 +630,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         base_response["warnings"] = warnings
 
         if not ok:
-            # Сохраняем сырой ответ модели для отладки парсинга
+
             base_response["raw_model"] = raw_content
             try:
                 _log_parse_error({
@@ -715,9 +643,6 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
             except Exception:
                 pass
 
-            # Вместо того, чтобы возвращать фронтенду техническую ошибку,
-            # возвращаем дружелюбный текстовый ответ (чат-формат), чтобы
-            # пользователь не видел "Не удалось разобрать ответ модели".
             try:
                 return {
                     'success': True,
@@ -740,15 +665,11 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         return base_response
 
 def get_free_slots_for_date(date, existing_events):
-    """
-    Находит свободные временные слоты на заданную дату.
-    Возвращает список доступных временных интервалов.
-    """
-    # Рабочие часы: 9:00 - 18:00
+    
+
     work_start = datetime.combine(date, datetime.strptime("09:00", "%H:%M").time())
     work_end = datetime.combine(date, datetime.strptime("18:00", "%H:%M").time())
 
-    # Сортируем существующие события по времени
     sorted_events = sorted(existing_events, key=lambda x: x.start_time)
 
     free_slots = []
@@ -756,22 +677,19 @@ def get_free_slots_for_date(date, existing_events):
 
     for event in sorted_events:
         event_start = event.start_time
-        event_end = event.end_time or event.start_time  # Если end_time не указан, считаем событие точечным
+        event_end = event.end_time or event.start_time
 
-        # Если событие начинается после текущего времени, добавляем свободный слот
         if event_start > current_time:
-            slot_duration = (event_start - current_time).total_seconds() / 3600  # в часах
-            if slot_duration >= 0.5:  # Минимум 30 минут
+            slot_duration = (event_start - current_time).total_seconds() / 3600
+            if slot_duration >= 0.5:
                 free_slots.append({
                     'start': current_time,
                     'end': event_start,
                     'duration_hours': slot_duration
                 })
 
-        # Обновляем текущее время на конец события
         current_time = max(current_time, event_end)
 
-    # Добавляем слот после последнего события до конца рабочего дня
     if current_time < work_end:
         slot_duration = (work_end - current_time).total_seconds() / 3600
         if slot_duration >= 0.5:
@@ -784,10 +702,7 @@ def get_free_slots_for_date(date, existing_events):
     return free_slots
 
 def auto_assign_category(title: str, description: str = "") -> str:
-    """
-    Автоматически определяет категорию задачи на основе её названия и описания.
-    Возвращает наиболее подходящую категорию из списка CATEGORIES.
-    """
+    
     text = f"{title} {description}".lower().strip()
 
     if not text:
@@ -800,7 +715,7 @@ def auto_assign_category(title: str, description: str = "") -> str:
             kw = keyword.lower()
             if not kw:
                 continue
-            # количество вхождений + бонус за отдельные слова
+
             score += text.count(kw)
             if f" {kw} " in f" {text} ":
                 score += 2
@@ -811,30 +726,21 @@ def auto_assign_category(title: str, description: str = "") -> str:
         return "Личное"
     return best_category
 
-
 def suggest_optimal_time(date, description, existing_events, priority: str = "medium"):
-    """
-    Предлагает *конкретное время* начала события внутри свободных слотов.
-    Не возвращает 09:00 по умолчанию, а подбирает час в пределах свободного окна.
-    """
+    
     return suggest_optimal_time_with_exclusions(date, description, existing_events, priority, [])
 
-
 def suggest_optimal_time_with_exclusions(date, description, existing_events, priority: str = "medium", exclude_times: list = None):
-    """
-    Предлагает оптимальное время с учетом уже предложенных времен (exclude_times).
-    Анализирует занятость более точно, учитывая длительность событий и перерывы между ними.
-    """
+    
     if exclude_times is None:
         exclude_times = []
-    
+
     free_slots = get_free_slots_for_date(date, existing_events)
     if not free_slots:
         return None
 
     event_type = (description or "").lower()
 
-    # Предпочитаемые часы для разных типов задач
     time_prefs_by_category = {
         "work": [9, 10, 11, 14, 15, 16],
         "lunch": [12, 13, 14],
@@ -844,7 +750,6 @@ def suggest_optimal_time_with_exclusions(date, description, existing_events, pri
         "personal": [10, 11, 17, 18, 19],
     }
 
-    # Определяем категорию для подбора времени
     if any(w in event_type for w in ["встреча", "совещание", "митинг", "meeting", "работа", "проект", "бизнес"]):
         category = "work"
     elif any(w in event_type for w in ["обед", "перерыв", "пауза", "кушать", "поесть"]):
@@ -860,7 +765,6 @@ def suggest_optimal_time_with_exclusions(date, description, existing_events, pri
 
     preferred_hours = time_prefs_by_category[category]
 
-    # Преобразуем exclude_times в datetime для сравнения
     exclude_datetimes = []
     for time_str in exclude_times:
         try:
@@ -870,52 +774,44 @@ def suggest_optimal_time_with_exclusions(date, description, existing_events, pri
         except Exception:
             pass
 
-    # Строим список всех допустимых кандидатов времени (datetime) внутри свободных слотов
-    # Учитываем не только предпочтительные часы, но и все доступные времена с шагом 30 минут
     candidates = []
-    
-    # Сначала пробуем предпочтительные часы
+
     for slot in free_slots:
         start_hour = slot["start"].hour
         end_hour = slot["end"].hour
         for h in preferred_hours:
             if start_hour <= h < end_hour:
                 candidate = datetime.combine(date, datetime.strptime(f"{h:02d}:00", "%H:%M").time())
-                # Проверяем, что это время не в списке исключений
+
                 if not any(abs((candidate - excl).total_seconds()) < 1800 for excl in exclude_datetimes):
                     candidates.append(candidate)
-    
-    # Если предпочтительные часы все исключены, генерируем варианты с шагом 30 минут
+
     if not candidates:
         for slot in free_slots:
             current = slot["start"]
             while current < slot["end"]:
-                # Пропускаем исключенные времена
+
                 if not any(abs((current - excl).total_seconds()) < 1800 for excl in exclude_datetimes):
                     candidates.append(current)
                 current += timedelta(minutes=30)
-                if len(candidates) >= 10:  # Ограничиваем количество кандидатов
+                if len(candidates) >= 10:
                     break
             if len(candidates) >= 10:
                 break
 
-    # Если ничего не найдено, возвращаем None
     if not candidates:
         return None
 
     candidates.sort()
 
-    # Выбираем оптимальное время в зависимости от приоритета
     if priority == "high":
         return candidates[0]
     if priority == "low":
         return candidates[-1]
 
-    # Для среднего приоритета берём ближайшее к 15:00, но не из исключенных
     target = datetime.combine(date, datetime.strptime("15:00", "%H:%M").time())
     best = min(candidates, key=lambda dt: abs((dt - target).total_seconds()))
     return best
-
 
 def get_token():
     global TOKEN_CACHE
@@ -967,35 +863,28 @@ def get_token():
     except Exception:
         return None
 
-
 def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
-    """
-    Расширенная версия ask_gigachat, которая может обрабатывать запросы на создание событий.
-    Возвращает dict с типом ответа и данными.
-    """
-    # Перезагружаем переменные окружения при каждом вызове
+    
+
     load_dotenv()
     global AUTHORIZATION_KEY
     AUTHORIZATION_KEY = os.getenv("GIGACHAT_AUTHORIZATION_KEY")
 
-    # Сбрасываем кэш токена при каждом вызове для надежности
     global TOKEN_CACHE
     TOKEN_CACHE = None
 
-    # Сначала проверяем, является ли сообщение запросом на создание события
     if db_session and user_id:
-        # Проверяем, является ли сообщение задачей
+
         if not is_task_request(message):
-            # Это не задача - переходим к обычному чату
-            pass  # код ниже обработает как обычный чат
+
+            pass
         else:
             event_request = parse_event_request(message)
             if event_request:
-                # Это запрос на создание события
+
                 target_date = event_request['date']
                 description = event_request['description']
 
-                # Получаем существующие события на эту дату
                 from backend.database import Event
                 existing_events = db_session.query(Event).filter(
                     Event.user_id == user_id,
@@ -1003,7 +892,6 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
                     Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
                 ).all()
 
-                # Предлагаем оптимальное время
                 suggested_time = suggest_optimal_time(target_date, description, existing_events)
 
                 if suggested_time:
@@ -1022,7 +910,6 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
                         'content': f"Извините, на {target_date.strftime('%d.%m.%Y')} нет свободного времени для события '{description}'. Попробуйте выбрать другую дату."
                     }
 
-    # Если есть сессия БД — передаём существующие таски в модель как контекст
     existing_tasks = None
     if db_session is not None and user_id is not None:
         try:
@@ -1041,11 +928,10 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
         except Exception:
             existing_tasks = None
 
-    # Проверяем, является ли сообщение задачей
     if not is_task_request(message):
-        # Это обычное сообщение - переходим к чат-режиму
+
         try:
-            # Импортируем клиент устойчиво: сначала пробуем пакет, затем модуль
+
             try:
                 from backend.ai_client import post_conversation
             except Exception:
@@ -1053,7 +939,7 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
 
             conv = post_conversation(message)
             if conv.get('success') and conv.get('raw'):
-                # Возвращаем текстовый ответ модели (чат-режим)
+
                 return {
                     'success': True,
                     'original_text': message,
@@ -1083,22 +969,20 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
 
     structured = extract_task_via_gigachat(message, existing_tasks=existing_tasks)
 
-    # Если модель вернула удачно распознанную задачу — предложим пользователю подтверждение
     if structured.get("success"):
         processed = structured["processed_task"] or {}
 
-        # Попытка предложить оптимальное время на основе существующих событий
         suggested_time = None
         try:
             if db_session is not None and user_id is not None and processed:
-                # преобразуем дату и description в объекты
+
                 from datetime import datetime as _dt
                 date_str = processed.get('date')
                 desc = processed.get('title') or processed.get('description') or ''
                 priority = processed.get('priority', 'medium')
                 if date_str:
                     date_obj = _dt.fromisoformat(date_str).date()
-                    # используем локальную функцию suggest_optimal_time
+
                     suggested = suggest_optimal_time(date_obj, desc, evs if 'evs' in locals() else [], priority)
                     if suggested:
                         suggested_time = suggested.strftime('%H:%M')
@@ -1113,7 +997,6 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
         if structured.get("warnings"):
             summary += "\nПредупреждения: " + "; ".join(structured["warnings"])
 
-        # Если есть назначений view от модели — включаем их в ответ для фронтенда
         assignments = None
         try:
             raw_model = structured.get('raw_model')

@@ -5,19 +5,16 @@ from typing import Optional, Dict, Any
 
 import dateparser
 
-# Попробуем необязательно подключить spaCy — если модели нет, работаем без него
 try:
     import spacy
     _SPACY_AVAILABLE = True
     _SPACY_NLP = None
 except Exception:
-    spacy = None  # type: ignore
+    spacy = None
     _SPACY_AVAILABLE = False
     _SPACY_NLP = None
 
-
 DEFAULT_CATEGORIES = ["Работа", "Учеба", "Личное", "Здоровье", "Покупки", "Встречи"]
-
 
 def _detect_category(text: str) -> str:
     t = text.lower()
@@ -45,7 +42,6 @@ def _detect_category(text: str) -> str:
             return v
     return "Личное"
 
-
 def _detect_priority(text: str) -> str:
     t = text.lower()
     high_words = ["срочно", "важно", "критично", "очень надо", "!!!"]
@@ -58,9 +54,8 @@ def _detect_priority(text: str) -> str:
             return "low"
     return "medium"
 
-
 def _extract_time(text: str) -> Optional[dtime]:
-    # Поиск формата HH:MM или H:MM
+
     m = re.search(r"(\d{1,2})[:\.](\d{2})", text)
     if m:
         h = int(m.group(1))
@@ -69,15 +64,13 @@ def _extract_time(text: str) -> Optional[dtime]:
             return dtime(hour=h, minute=mi)
     return None
 
-
 def _clean_description(text: str) -> str:
-    # Удаляем дублирующие пробелы и лишние слова
+
     s = text.strip()
-    # Удаляем маркеры вроде 'в', 'на' перед датами — базовая очистка
+
     s = re.sub(r"\b(в|во|на|к|о|по)\b", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
 
 def _make_title(description: str, max_words: int = 6) -> str:
     words = description.split()
@@ -87,18 +80,15 @@ def _make_title(description: str, max_words: int = 6) -> str:
     title = " ".join(title_words)
     return title.capitalize()
 
-
 def local_parse(text: str) -> Optional[Dict[str, Any]]:
-    """Попытка локально распарсить текст заметки: возвращает dict с date,time,description или None."""
+    
     if not text or not text.strip():
         return None
 
     raw = text.strip()
 
-    # Сначала пробуем явно извлечь время
     extracted_time = _extract_time(raw)
 
-    # Настройки dateparser: русская локаль, относительная база = сейчас
     settings = {
         'PREFER_DATES_FROM': 'future',
         'RELATIVE_BASE': datetime.now()
@@ -110,8 +100,6 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
     if parsed:
         parsed_date = parsed.date()
 
-    # Если dateparser не определил дату, но текст содержит слова 'завтра', 'послезавтра' и т.д.,
-    # dateparser обычно обрабатывает относительные даты; если нет — попробуем простые эвристики
     if not parsed_date:
         t = raw.lower()
         if 'сегодня' in t:
@@ -121,18 +109,16 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
         elif 'послезавтра' in t:
             parsed_date = (datetime.now() + timedelta(days=2)).date()
         else:
-            # попытка распознать 'через N дней'
+
             m = re.search(r'через\s+(\d+)\s+дн', t)
             if m:
                 parsed_date = (datetime.now() + timedelta(days=int(m.group(1)))).date()
             else:
                 parsed_date = None
 
-    # Если всё ещё не распознали дату — используем сегодняшнюю
     if not parsed_date:
         parsed_date = datetime.now().date()
 
-    # Убедимся, что дата не в прошлом (если это не указано явно)
     today = datetime.now().date()
     if parsed_date < today:
         parsed_date = today
@@ -142,18 +128,15 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
     category = _detect_category(raw)
     priority = _detect_priority(raw)
 
-    # Попробуем извлечь действие/вид активности через spaCy (если доступен).
-    # Простая эвристика: ищем конструкции 'хочу <глагол>' и подобные, чтобы распознать активность
     activity_title = None
     activity_category = None
     try:
         want_match = re.search(r"\b(хочу|хотел бы|хотела бы|надо|нужно|пойду|схожу)\s+([а-яё-]+)", raw, re.I)
         if want_match:
             verb = want_match.group(2).lower()
-            # Обрезаем конечные знаки пунктуации
+
             verb = re.sub(r"[^а-яё]+$", "", verb)
-            # Простейшее преобразование инфинитива/глагола в название активности
-            # Попробуем сопоставить глагол по подстроке к известным активностям
+
             verb_norm_map = {
                 'плав': 'Плавание',
                 'плы': 'Плавание',
@@ -168,7 +151,7 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
                     activity_title = v
                     break
             if not activity_title:
-                # как запасной вариант — пробуем простое преобразование инфинитива -> имя действия
+
                 if verb.endswith('ть'):
                     stem = verb[:-1]
                     candidate = stem + 'ие'
@@ -178,7 +161,7 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
                 else:
                     candidate = verb
                 activity_title = candidate.capitalize()
-            # Категория по подстроке
+
             cat_map = {
                 'плав': 'Здоровье',
                 'бег': 'Здоровье',
@@ -198,11 +181,11 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
         if _SPACY_AVAILABLE:
             try:
                 if _SPACY_NLP is None:
-                    # Загружаем модель лениво, чтобы не падать при импорте модуля
+
                     try:
                         _SPACY_NLP = spacy.load("ru_core_news_sm")
                     except Exception:
-                        # Попробуем альтернативное имя модели, если пользователь установил другую
+
                         try:
                             _SPACY_NLP = spacy.load("ru_core_news_md")
                         except Exception:
@@ -210,9 +193,9 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
 
                 if _SPACY_NLP:
                     doc = _SPACY_NLP(raw)
-                    # Ищем инфинитив/глагол действий — часто встречается в конструкциях «хочу поплавать»
+
                     verb_lemmas = [tok.lemma_ for tok in doc if tok.pos_ in ("VERB", "INF")]
-                    # Если нет явных глаголов, смотрим на существительные
+
                     noun_lemmas = [tok.lemma_ for tok in doc if tok.pos_ == "NOUN"]
 
                     chosen = None
@@ -222,16 +205,15 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
                         chosen = noun_lemmas[0]
 
                     if chosen:
-                        # Преобразуем инфинитив в название активности простым эвристическим правилом
+
                         act = chosen
-                        # Если лемма оканчивается на 'ть', формируем '...ние' (плавать -> плавание)
+
                         if act.endswith("ть"):
                             stem = act[:-1]
                             activity_title = (stem + "ие").lower()
                         else:
                             activity_title = act.lower()
 
-                        # Небольшая карта для нормализации форм
                         normalization = {
                             'плавание': 'Плавание',
                             'плавать': 'Плавание',
@@ -245,10 +227,9 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
                         if normalized:
                             activity_title = normalized
                         else:
-                            # Приводим к заглавной форме как запасной вариант
+
                             activity_title = activity_title.capitalize()
 
-                        # Определяем категорию по ключевым подстрокам
                         cat_map = {
                             'плав': 'Здоровье',
                             'бег': 'Здоровье',
@@ -271,7 +252,6 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
         activity_title = None
         activity_category = None
 
-    # Если простая эвристика нашла активность — используем её (приоритет выше spaCy)
     if activity_title:
         title = activity_title
         if activity_category:
@@ -285,7 +265,6 @@ def local_parse(text: str) -> Optional[Dict[str, Any]]:
         'category': category,
         'priority': priority
     }
-
 
 if __name__ == '__main__':
     examples = [

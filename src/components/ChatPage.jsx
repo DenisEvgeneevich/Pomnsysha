@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './ChatPage.css';
+import { getTelegramHeaders } from '../utils/telegramWebApp';
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
@@ -26,10 +27,14 @@ const ChatPage = ({ onBack }) => {
   }, [messages]);
 
   const sendMessageToAPI = async (text) => {
+    const telegramHeaders = getTelegramHeaders();
     const response = await fetch(`${API_URL}/chat`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        ...telegramHeaders
+      },
       body: JSON.stringify({ message: text })
     });
 
@@ -38,16 +43,20 @@ const ChatPage = ({ onBack }) => {
     }
 
     const data = await response.json();
-    // Возвращаем либо `reply`, либо сам объект ответа — это безопаснее
+
     return data.reply ?? data;
   };
 
   const confirmEventCreation = async (eventData) => {
     try {
+      const telegramHeaders = getTelegramHeaders();
       const response = await fetch(`${API_URL}/confirm-event`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...telegramHeaders
+        },
         body: JSON.stringify(eventData)
       });
 
@@ -105,13 +114,11 @@ const ChatPage = ({ onBack }) => {
 
       let botMsg;
 
-      // Нормализуем ответ модели
       const respType = (botResponse && typeof botResponse === 'object' && botResponse.type) || (typeof botResponse === 'string' ? 'text' : 'text');
       const respContent = (botResponse && typeof botResponse === 'object')
         ? (botResponse.content ?? botResponse.reply ?? botResponse.text ?? JSON.stringify(botResponse))
         : botResponse;
 
-      // Обработка proposal от ИИ
       if (respType === 'proposal' && botResponse.structured && botResponse.structured.processed_task) {
         const processed = botResponse.structured.processed_task;
         const dateStr = processed.date;
@@ -167,19 +174,22 @@ const ChatPage = ({ onBack }) => {
 
       setMessages(prev => [...prev, botMsg]);
 
-      // Если модель прислала назначения `assignments`, попробуем сохранить их в бэкенд
       try {
         const assignments = (botResponse && (botResponse.assignments || (botResponse.structured && botResponse.structured.assignments))) || null;
         if (assignments && typeof assignments === 'object') {
+          const telegramHeaders = getTelegramHeaders();
           fetch(`${API_URL}/assignments`, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...telegramHeaders
+            },
             body: JSON.stringify({ assignments })
           }).catch(() => null);
         }
       } catch (e) {
-        // ignore
+
       }
     } catch (error) {
       const errMsg = {
@@ -218,7 +228,7 @@ const ChatPage = ({ onBack }) => {
 
       setMessages(prev => prev.map(msg =>
         msg.id === messageId
-          ? { ...msg, eventSuggestion: null } // Убираем кнопки после ответа
+          ? { ...msg, eventSuggestion: null }
           : msg
       ));
 
@@ -247,7 +257,7 @@ const ChatPage = ({ onBack }) => {
 
     setMessages(prev => prev.map(msg =>
       msg.id === messageId
-        ? { ...msg, eventSuggestion: null } // Убираем кнопки
+        ? { ...msg, eventSuggestion: null }
         : msg
     ));
 
@@ -278,7 +288,7 @@ const ChatPage = ({ onBack }) => {
                       className="confirm-btn"
                       onClick={() => handleConfirmEvent(m.id, {
                         date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
-                        time: m.eventSuggestion.time, // HH:MM
+                        time: m.eventSuggestion.time,
                         description: m.eventSuggestion.description
                       })}
                       disabled={isLoading}
@@ -297,7 +307,7 @@ const ChatPage = ({ onBack }) => {
                       onClick={async () => {
                         setIsLoading(true);
                         try {
-                          // Собираем все уже предложенные времена для исключения
+
                           const excludeTimes = [];
                           if (m.eventSuggestion.time) {
                             excludeTimes.push(m.eventSuggestion.time);
@@ -305,54 +315,52 @@ const ChatPage = ({ onBack }) => {
                           if (m.eventSuggestion.previousTimes) {
                             excludeTimes.push(...m.eventSuggestion.previousTimes);
                           }
-                          
-                          // Запросим новое оптимальное время у ИИ
+
                           const res = await fetch(`${API_URL}/suggest-times`, {
                             method: 'POST',
                             credentials: 'include',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
+                            body: JSON.stringify({
                               date: m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date,
                               description: m.eventSuggestion.description,
                               priority: 'medium',
                               exclude_times: excludeTimes
                             })
                           });
-                          
+
                           if (!res.ok) {
                             const errorData = await res.json();
                             throw new Error(errorData.error || 'Ошибка получения времени');
                           }
-                          
+
                           const body = await res.json();
                           const newTime = body.time;
                           const message = body.message || `Предлагаю новое время: ${newTime}`;
-                          
+
                           if (newTime) {
-                            // Сохраняем предыдущие времена
+
                             const previousTimes = [
                               ...(m.eventSuggestion.previousTimes || []),
                               ...(m.eventSuggestion.time ? [m.eventSuggestion.time] : [])
                             ];
-                            
-                            // Обновляем сообщение с новым временем
-                            setMessages(prev => prev.map(msg => 
-                              msg.id === m.id 
-                                ? { 
-                                    ...msg, 
-                                    eventSuggestion: { 
-                                      ...msg.eventSuggestion, 
+
+                            setMessages(prev => prev.map(msg =>
+                              msg.id === m.id
+                                ? {
+                                    ...msg,
+                                    eventSuggestion: {
+                                      ...msg.eventSuggestion,
                                       time: newTime,
                                       previousTimes: previousTimes,
                                       newTimeProposed: true,
                                       newTimeMessage: message
-                                    } 
-                                  } 
+                                    }
+                                  }
                                 : msg
                             ));
                           }
                         } catch (e) {
-                          // Показываем ошибку пользователю
+
                           const errorMsg = {
                             id: Date.now() + 1000,
                             text: `⚠ ${e.message || 'Не удалось получить новое время'}`,

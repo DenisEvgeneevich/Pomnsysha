@@ -1,0 +1,40 @@
+✅ ЧЕКЛИСТ ЗАГРУЗКИ НА СЕРВЕР
+================================
+
+📁 FRONTEND (загрузить в /var/www/pomnyasha.ru/frontend/):
+   ✅ build/index.html
+   ✅ build/static/ (вся папка)
+   ✅ build/asset-manifest.json
+
+📁 BACKEND (загрузить в /var/www/pomnyasha.ru/backend/):
+   ✅ backend/app.py
+   ✅ backend/database.py
+   ✅ backend/ai.py
+   ✅ backend/ai_client.py
+   ✅ backend/ai_parser.py
+   ✅ backend/ai_prompt.py
+   ✅ backend/google_calendar.py
+   ✅ backend/telegram_bot.py
+   ✅ backend/run_bot.py
+   ✅ backend/requirements.txt
+   ✅ backend/__init__.py
+   ✅ backend/secrets/ (папка с client_secret.json)
+   ✅ backend/pomnyasha-backend.service
+   ✅ backend/pomnyasha-bot.service
+   ✅ nginx.conf.example
+
+❌ НЕ ЗАГРУЖАТЬ:
+   - backend/venv/
+   - backend/__pycache__/
+   - backend/app.db (создастся автоматически)
+
+🔧 ПОСЛЕ ЗАГРУЗКИ НА СЕРВЕРЕ:
+   1. Создать виртуальное окружение
+   2. Установить зависимости
+   3. Создать .env файл
+   4. Настроить systemd сервисы
+   5. Настроить nginx
+   6. Настроить SSL
+
+📖 Подробные инструкции: FINAL_DEPLOY_INSTRUCTIONS.md
+

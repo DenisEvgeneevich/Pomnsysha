@@ -10,13 +10,11 @@ from backend.database import engine, Event, get_user_creds
 
 TIMEZONE = "Europe/Moscow"
 
-
 def _service(user_id: int):
     creds = get_user_creds(user_id)
     if not creds:
         return None
     return build("calendar", "v3", credentials=creds)
-
 
 def create_google_event(user_id: int, event_data: dict) -> Optional[str]:
     svc = _service(user_id)
@@ -36,7 +34,6 @@ def create_google_event(user_id: int, event_data: dict) -> Optional[str]:
     except Exception:
         return None
 
-
 def _update_google_event_raw(user_id: int, event_id: str, body: dict) -> bool:
     svc = _service(user_id)
     if not svc:
@@ -48,7 +45,6 @@ def _update_google_event_raw(user_id: int, event_id: str, body: dict) -> bool:
         if e.resp is not None and e.resp.status == 404:
             return False
         raise
-
 
 def upsert_google_event(user_id: int, event: Event) -> Optional[str]:
     svc = _service(user_id)
@@ -65,9 +61,8 @@ def upsert_google_event(user_id: int, event: Event) -> Optional[str]:
     if event.external_id:
         ok = _update_google_event_raw(user_id, event.external_id, body)
         if ok:
-            return event.external_id  # Возвращаем существующий ID при успешном обновлении
+            return event.external_id
 
-    # Создаем новое событие в Google Calendar
     gid = create_google_event(
         user_id,
         {
@@ -79,7 +74,6 @@ def upsert_google_event(user_id: int, event: Event) -> Optional[str]:
     )
     return gid
 
-
 def delete_google_event(user_id: int, event: Event):
     svc = _service(user_id)
     if not svc or not event.external_id:
@@ -88,7 +82,6 @@ def delete_google_event(user_id: int, event: Event):
         svc.events().delete(calendarId="primary", eventId=event.external_id).execute()
     except HttpError:
         pass
-
 
 def _fetch_google_events_window(user_id: int) -> list[dict]:
     svc = _service(user_id)
@@ -110,10 +103,8 @@ def _fetch_google_events_window(user_id: int) -> list[dict]:
 
     return response.get("items", [])
 
-
 def _dt_from_google(val: str) -> datetime:
     return datetime.fromisoformat(val.replace("Z", "+00:00"))
-
 
 def sync_google_calendar(user_id: int):
     svc = _service(user_id)
@@ -177,8 +168,6 @@ def sync_google_calendar(user_id: int):
                 if changed:
                     db.add(local)
 
-        # Удаляем только те события, которые были синхронизированы из Google Calendar,
-        # но больше не существуют там. Локальные события без external_id не трогаем.
         local_events_with_external_id = db.scalars(
             select(Event).where(
                 Event.user_id == user_id,
@@ -189,21 +178,19 @@ def sync_google_calendar(user_id: int):
         for e in local_events_with_external_id:
             if e.external_id not in google_ids:
                 db.delete(e)
-        
-        # Теперь создаем события в Google Calendar для локальных событий без external_id
+
         local_events_without_external_id = db.scalars(
             select(Event).where(
                 Event.user_id == user_id,
                 Event.external_id.is_(None)
             )
         ).all()
-        
+
         for e in local_events_without_external_id:
-            # Пропускаем события, которые были только что созданы и еще не синхронизированы
-            # (они будут синхронизированы отдельно через upsert_google_event)
+
             if e.source == "google":
                 continue
-                
+
             try:
                 gid = create_google_event(
                     user_id,

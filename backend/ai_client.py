@@ -11,7 +11,6 @@ import urllib3
 
 from dotenv import load_dotenv
 
-# Импортируем build_gigachat_prompt устойчиво (пакет или модуль)
 try:
     from .ai_prompt import build_gigachat_prompt
 except Exception:
@@ -31,10 +30,8 @@ API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-# simple token cache
 _CACHED_TOKEN = None
 _TOKEN_EXPIRES_AT = 0.0
-
 
 def _safe_post(url, **kwargs):
     kwargs2 = kwargs.copy()
@@ -46,7 +43,6 @@ def _safe_post(url, **kwargs):
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         kwargs2['verify'] = False
         return requests.post(url, **kwargs2)
-
 
 def get_token_from_env() -> Optional[dict]:
     auth_key = os.getenv('GIGACHAT_AUTHORIZATION_KEY')
@@ -80,7 +76,6 @@ def get_token_from_env() -> Optional[dict]:
         logger.exception('get_token_from_env failed: %s', exc)
         return None
 
-
 def _get_cached_token() -> Optional[str]:
     global _CACHED_TOKEN, _TOKEN_EXPIRES_AT
     now = time.time()
@@ -89,13 +84,12 @@ def _get_cached_token() -> Optional[str]:
     info = get_token_from_env()
     if not info:
         return None
-    # info is expected to contain access_token and expires_in
+
     token = info.get('access_token') or info.get('token')
     expires = int(info.get('expires_in') or 3600)
     _CACHED_TOKEN = token
     _TOKEN_EXPIRES_AT = now + expires
     return _CACHED_TOKEN
-
 
 def _extract_content_from_response(r):
     try:
@@ -107,7 +101,6 @@ def _extract_content_from_response(r):
     except Exception:
         content = None
     return content, data
-
 
 def _do_request_with_payload(payload, max_attempts=2, timeout=8, slow_label='GigaChat'):
     token = _get_cached_token()
@@ -150,7 +143,6 @@ def _do_request_with_payload(payload, max_attempts=2, timeout=8, slow_label='Gig
             continue
     return {'success': False, 'error': f'Ошибка соединения с GigaChat: {last_err}', 'raw': None}
 
-
 def post_to_gigachat(user_text: str, max_attempts: int = 2, timeout: int = 8):
     prompt = build_gigachat_prompt(user_text) if build_gigachat_prompt else ''
     payload = {
@@ -163,7 +155,6 @@ def post_to_gigachat(user_text: str, max_attempts: int = 2, timeout: int = 8):
         "max_tokens": 300
     }
     return _do_request_with_payload(payload, max_attempts=max_attempts, timeout=timeout, slow_label='GigaChat')
-
 
 def post_conversation(user_text: str, max_attempts: int = 2, timeout: int = 8):
     system_prompt = (
@@ -181,7 +172,6 @@ def post_conversation(user_text: str, max_attempts: int = 2, timeout: int = 8):
     }
     return _do_request_with_payload(payload, max_attempts=max_attempts, timeout=timeout, slow_label='GigaChat-conv')
 
-
 def post_custom(system_prompt: str, user_text: str, max_attempts: int = 2, timeout: int = 8):
     payload = {
         "model": "GigaChat",
@@ -193,4 +183,3 @@ def post_custom(system_prompt: str, user_text: str, max_attempts: int = 2, timeo
         "max_tokens": 300
     }
     return _do_request_with_payload(payload, max_attempts=max_attempts, timeout=timeout, slow_label='GigaChat-custom')
-

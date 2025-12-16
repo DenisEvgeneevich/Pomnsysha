@@ -1,0 +1,16 @@
+[Unit]
+Description=Pomnyasha Backend API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/pomnyasha.ru/backend
+Environment="PATH=/var/www/pomnyasha.ru/backend/venv/bin"
+ExecStart=/var/www/pomnyasha.ru/backend/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+

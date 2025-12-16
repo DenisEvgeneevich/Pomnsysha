@@ -21,17 +21,17 @@
 }
 
 .modal-content h2 {
-  color: #573D27;
+  color:
   margin-bottom: 20px;
   text-align: center;
 }
 
 .task-preview {
-  background: #FFF9DA;
+  background:
   padding: 15px;
   border-radius: 10px;
   margin-bottom: 25px;
-  border-left: 4px solid #FFAE3E;
+  border-left: 4px solid
 }
 
 .form-group {
@@ -42,18 +42,18 @@
   display: block;
   margin-bottom: 8px;
   font-weight: 600;
-  color: #573D27;
+  color:
 }
 
 .form-group input,
 .form-group textarea {
   width: 100%;
   padding: 12px 15px;
-  border: 2px solid #C18F64;
+  border: 2px solid
   border-radius: 10px;
   font-size: 16px;
   font-family: 'Montserrat', sans-serif;
-  background-color: #FFF9DA;
+  background-color:
 }
 
 .form-group textarea {
@@ -80,19 +80,19 @@
 }
 
 .modal-actions button[type="button"] {
-  background: #f5f5f5;
-  color: #573D27;
+  background:
+  color:
 }
 
 .modal-actions button[type="button"]:hover {
-  background: #e0e0e0;
+  background:
 }
 
 .modal-actions button[type="submit"] {
-  background: #C18F64;
+  background:
   color: white;
 }
 
 .modal-actions button[type="submit"]:hover {
-  background: #a87a52;
+  background:
 }

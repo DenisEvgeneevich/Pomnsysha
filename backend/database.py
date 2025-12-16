@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import json
-from datetime import datetime 
+from datetime import datetime
 from sqlalchemy import (
     create_engine, Integer, String, DateTime, Text, ForeignKey, text
 )
@@ -16,7 +16,6 @@ load_dotenv()
 
 Base = declarative_base()
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -25,7 +24,6 @@ class User(Base):
 
     tokens = relationship("OAuthToken", back_populates="user", cascade="all,delete-orphan")
     events = relationship("Event", back_populates="user", cascade="all,delete-orphan")
-
 
 class OAuthToken(Base):
     __tablename__ = "oauth_tokens"
@@ -36,7 +34,6 @@ class OAuthToken(Base):
     token_json: Mapped[str] = mapped_column(Text)
 
     user = relationship("User", back_populates="tokens")
-
 
 class Event(Base):
     __tablename__ = "events"
@@ -53,7 +50,6 @@ class Event(Base):
 
     user = relationship("User", back_populates="events")
 
-
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
 
 engine = create_engine(
@@ -63,7 +59,6 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-
 def get_db():
     db = SessionLocal()
     try:
@@ -71,51 +66,39 @@ def get_db():
     finally:
         db.close()
 
-
 def create_tables():
     Base.metadata.create_all(bind=engine)
-    # Ensure `view` column exists for older databases (simple migration)
+
     ensure_view_column()
 
-
 def ensure_view_column():
-    """
-    Простая попытка добавить колонку `view` в таблицу `events`, если её ещё нет.
-    Работает для sqlite и других БД через простую ALTER TABLE.
-    """
+    
     try:
         with engine.begin() as conn:
-            # Проверим, есть ли колонка view
+
             res = conn.execute(text("PRAGMA table_info('events')")).fetchall()
             cols = [r[1] for r in res] if res else []
             if 'view' in cols:
                 return
 
-            # sqlite: простой ALTER TABLE ADD COLUMN
             if engine.url.drivername.startswith('sqlite'):
                 conn.execute(text("ALTER TABLE events ADD COLUMN view VARCHAR(50)"))
             else:
-                # Универсальная попытка
+
                 conn.execute(text("ALTER TABLE events ADD COLUMN view VARCHAR(50) NULL"))
     except Exception:
-        # Не фатализируем ошибку миграции здесь — пользователь может запустить миграцию вручную
+
         pass
 
-
 def get_user_creds(user_id: int) -> Credentials | None:
-    # Импортируем Credentials локально, чтобы приложение могло запускаться
-    # даже если пакет google не установлен.
     try:
         from google.oauth2.credentials import Credentials
     except Exception:
-        Credentials = None  # type: ignore
+        Credentials = None
 
     with engine.begin() as conn:
         row = conn.execute(
-            text("""
-                SELECT token_json FROM oauth_tokens
-                WHERE user_id = :uid AND provider = 'google'
-            """),
+            text("SELECT token_json FROM oauth_tokens WHERE user_id = :uid AND provider = 'google'"),
             {"uid": user_id}
         ).fetchone()
 
@@ -127,25 +110,29 @@ def get_user_creds(user_id: int) -> Credentials | None:
 
     return Credentials.from_authorized_user_info(json.loads(row[0]))
 
+def ensure_user_exists(user_id: int):
+    with engine.begin() as conn:
+        existing = conn.execute(
+            text("SELECT user_id FROM users WHERE user_id = :uid"),
+            {"uid": user_id}
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                text("INSERT INTO users (user_id) VALUES (:uid)"),
+                {"uid": user_id}
+            )
 
 def save_user_creds(user_id: int, creds: Credentials):
+    ensure_user_exists(user_id)
     token_json = creds.to_json()
     with engine.begin() as conn:
         updated = conn.execute(
-            text("""
-                UPDATE oauth_tokens
-                SET token_json = :t
-                WHERE user_id = :u AND provider = 'google'
-            """),
+            text("UPDATE oauth_tokens SET token_json = :t WHERE user_id = :u AND provider = 'google'"),
             {"u": user_id, "t": token_json}
         )
 
         if updated.rowcount == 0:
             conn.execute(
-                text("""
-                    INSERT INTO oauth_tokens (user_id, provider, token_json)
-                    VALUES (:u, 'google', :t)
-                """),
+                text("INSERT INTO oauth_tokens (user_id, provider, token_json) VALUES (:u, 'google', :t)"),
                 {"u": user_id, "t": token_json}
             )
-    

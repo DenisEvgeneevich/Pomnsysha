@@ -11,7 +11,8 @@ const StatisticsPage = ({ onBack }) => {
     const loadStats = async () => {
       try {
         setIsLoading(true);
-        const response = await fetchWithSession('http://localhost:8000/stats');
+        const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
+        const response = await fetchWithSession(`${API_URL}/stats`);
 
         if (!response.ok) {
           throw new Error('Не удалось загрузить статистику');
@@ -62,7 +63,6 @@ const StatisticsPage = ({ onBack }) => {
 
   const { weeklyStats = [], pieData = [], mostBusyDay, totalEvents = 0 } = statsData || {};
 
-  // Функция для создания круговой диаграммы
   const renderPieChart = () => {
     if (!pieData || pieData.length === 0) {
       return (
@@ -83,7 +83,6 @@ const StatisticsPage = ({ onBack }) => {
       const endAngle = currentAngle + angle;
       currentAngle = endAngle;
 
-      // Координаты для SVG path
       const startX = 100 + 80 * Math.cos((startAngle - 90) * (Math.PI / 180));
       const startY = 100 + 80 * Math.sin((startAngle - 90) * (Math.PI / 180));
       const endX = 100 + 80 * Math.cos((endAngle - 90) * (Math.PI / 180));
@@ -106,8 +105,8 @@ const StatisticsPage = ({ onBack }) => {
             stroke="#FFF9DA"
             strokeWidth="2"
           />
-          {/* Текст с процентами в центре сегмента */}
-          {category.value > 5 && ( // Показываем проценты только если сегмент достаточно большой
+          {}
+          {category.value > 5 && (
             <text
               x={100 + 40 * Math.cos((startAngle + angle/2 - 90) * (Math.PI / 180))}
               y={100 + 40 * Math.sin((startAngle + angle/2 - 90) * (Math.PI / 180))}
@@ -128,7 +127,7 @@ const StatisticsPage = ({ onBack }) => {
 
   return (
     <div className="statistics-page">
-      {/* Шапка - только кнопка назад */}
+      {}
       <header className="stats-header">
         <button className="back-button" onClick={onBack}>
           ← Вернуться назад
@@ -136,17 +135,17 @@ const StatisticsPage = ({ onBack }) => {
       </header>
 
       <div className="stats-content">
-        {/* Круговая диаграмма */}
+        {}
         <div className="stats-section">
           <h2>Статистика задач ({totalEvents} всего)</h2>
           <div className="pie-chart-container">
             <svg width="200" height="200" viewBox="0 0 200 200" className="pie-chart">
               {renderPieChart()}
-              {/* Центральный круг */}
+              {}
               <circle cx="100" cy="100" r="30" fill="#FFF9DA" />
             </svg>
 
-            {/* Легенда */}
+            {}
             <div className="pie-legend">
               {pieData && pieData.length > 0 ? (
                 pieData.map((category, index) => (
@@ -169,7 +168,7 @@ const StatisticsPage = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Статистика по дням недели */}
+        {}
         <div className="stats-section">
           <h2>Загруженность по дням недели</h2>
           <div className="days-stats">
@@ -198,7 +197,7 @@ const StatisticsPage = ({ onBack }) => {
             )}
           </div>
 
-          {/* Самый загруженный день */}
+          {}
           {mostBusyDay && mostBusyDay.tasks > 0 && (
             <div className="most-busy-day">
               <div className="most-busy-badge">Самый загруженный день</div>
