@@ -553,6 +553,62 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
     short_accepts = {'да', 'давай', 'ок', 'окей', 'хорошо', 'согласен', 'согласна'}
     msg_norm = (msg or '').strip().lower()
 
+    # Запросы вида "какие планы на сегодня/завтра/16.12" обрабатываем отдельно,
+    # без обращения к ИИ — сразу читаем события из БД.
+    try:
+        schedule_markers = ["планы", "расписание", "дела", "задачи"]
+        if any(word in msg_norm for word in schedule_markers):
+            from datetime import date as _date
+
+            # Определяем целевую дату
+            target_date = _date.today()
+            if "завтра" in msg_norm:
+                target_date = target_date + timedelta(days=1)
+            elif "послезавтра" in msg_norm:
+                target_date = target_date + timedelta(days=2)
+            else:
+                # Пытаемся найти явную дату формата дд.мм или дд.мм.гггг
+                import re as _re
+
+                m = _re.search(r"(\\d{1,2})[.](\\d{1,2})(?:[.](\\d{2,4}))?", msg_norm)
+                if m:
+                    day, month = int(m.group(1)), int(m.group(2))
+                    year = int(m.group(3)) if m.group(3) else target_date.year
+                    if year < 100:
+                        year += 2000
+                    try:
+                        target_date = _date(year, month, day)
+                    except Exception:
+                        pass
+
+            start_dt = datetime.combine(target_date, datetime.min.time())
+            end_dt = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+
+            day_events = (
+                db.query(Event)
+                .filter(Event.user_id == user_id, Event.start_time >= start_dt, Event.start_time < end_dt)
+                .order_by(Event.start_time)
+                .all()
+            )
+
+            if not day_events:
+                text = f"На {target_date.strftime('%d.%m.%Y')} у тебя пока нет запланированных событий."
+            else:
+                parts = []
+                for ev in day_events:
+                    t = ev.start_time.strftime("%H:%M")
+                    label = f" ({ev.view})" if getattr(ev, 'view', None) else ""
+                    parts.append(f"{t} — {ev.title}{label}")
+                text = (
+                    f"На {target_date.strftime('%d.%m.%Y')} у тебя {len(day_events)} событ."
+                    f"\n" + "\n".join(parts)
+                )
+
+            return {"reply": {"type": "text", "content": text}}
+    except Exception:
+        # Если что-то пошло не так — просто продолжаем обычную обработку
+        pass
+
     # Сохраним/персистим сессию cookie
     resp = {}
 
@@ -573,36 +629,34 @@ def chat_endpoint(data: Dict[str, Any], request: Request, response: Response, db
                     return {"reply": {"type": "text", "content": "Не удалось определить дату для события."}}
 
                 if not time_str:
-                    # если времени нет — оставляем null, ИИ сам предложит оптимальное время
+                    # Если времени нет — попросим ИИ подобрать оптимальное с учётом занятости.
                     time_str = None
 
                 # Создаем событие с правильным временем
                 if time_str:
                     event_datetime = datetime.fromisoformat(f"{date_str}T{time_str}")
                 else:
-                    # Если время не указано, используем suggest_optimal_time
                     from backend.ai import suggest_optimal_time
-                    from backend.database import Event
 
-                    # Получаем существующие события на эту дату для анализа
-                    existing_events = db_session.query(Event).filter(
+                    target_date = datetime.fromisoformat(date_str).date()
+                    existing_events = db.query(Event).filter(
                         Event.user_id == user_id,
-                        Event.start_time >= datetime.combine(datetime.fromisoformat(date_str).date(), datetime.min.time()),
-                        Event.start_time < datetime.combine(datetime.fromisoformat(date_str).date() + timedelta(days=1), datetime.min.time())
+                        Event.start_time >= datetime.combine(target_date, datetime.min.time()),
+                        Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time()),
                     ).all()
 
                     suggested_time = suggest_optimal_time(
-                        datetime.fromisoformat(date_str).date(),
+                        target_date,
                         title,
                         existing_events,
-                        processed.get('priority', 'medium')
+                        processed.get("priority", "medium"),
                     )
 
                     if suggested_time:
                         event_datetime = suggested_time
                     else:
-                        # Fallback: используем 9:00 как последнее средство
-                        event_datetime = datetime.fromisoformat(f"{date_str}T09:00")
+                        # Последний fallback — ставим 15:00
+                        event_datetime = datetime.fromisoformat(f"{date_str}T15:00")
 
                 new_event = Event(
                     user_id=user_id,

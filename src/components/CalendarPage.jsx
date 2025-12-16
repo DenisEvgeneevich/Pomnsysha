@@ -236,13 +236,15 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
                       hour: "2-digit",
                       minute: "2-digit"
                     })}
+                    {ev.view && (
+                      <div className="event-time-category">
+                        {ev.view}
+                      </div>
+                    )}
                   </div>
 
                   <div className="event-details">
                     <div className="event-title">{ev.title}</div>
-                    {ev.view && (
-                      <div className="event-category">{ev.view}</div>
-                    )}
                     {ev.description && (
                       <div className="event-description">{ev.description}</div>
                     )}

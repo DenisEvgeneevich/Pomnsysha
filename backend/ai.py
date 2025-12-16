@@ -26,28 +26,30 @@ PRIORITIES = {"high", "medium", "low"}
 CATEGORY_KEYWORDS = {
     "Работа": [
         "работа", "проект", "встреча", "совещание", "бизнес", "офис", "коллеги", "начальник",
-        "отчет", "презентация", "дедлайн", "задача", "проект", "клиент", "контракт", "переговоры"
+        "отчет", "презентация", "дедлайн", "задача", "клиент", "контракт", "переговоры",
     ],
     "Учеба": [
         "учеба", "урок", "экзамен", "лекция", "домашнее задание", "контрольная", "семинар",
-        "курс", "обучение", "школа", "университет", "студент", "преподаватель", "учитель"
+        "курс", "обучение", "школа", "университет", "студент", "преподаватель", "учитель",
+        "занятие", "пары",
     ],
     "Здоровье": [
         "врач", "больница", "аптека", "здоровье", "мед", "прием", "осмотр", "анализ",
-        "спорт", "тренировка", "бег", "фитнес", "зал", "массаж", "стоматолог", "терапевт"
+        "спорт", "тренировка", "бег", "фитнес", "зал", "массаж", "стоматолог", "терапевт",
+        "поликлиника",
     ],
     "Покупки": [
         "купить", "магазин", "покупки", "шопинг", "товары", "продукты", "супермаркет",
-        "аптека", "одежда", "еда", "заказать", "доставка"
+        "аптека", "одежда", "еда", "заказать", "доставка",
     ],
     "Встречи": [
         "встреча", "друг", "друзья", "семья", "родители", "дети", "поход", "кафе",
-        "кино", "театр", "концерт", "праздник", "день рождения", "свидание"
+        "кино", "театр", "концерт", "праздник", "день рождения", "свидание",
     ],
     "Личное": [
         "личное", "дом", "быт", "уборка", "стирка", "ремонт", "счета", "платежи",
-        "документы", "паспорт", "банку", "почта", "звонок", "личный"
-    ]
+        "документы", "паспорт", "банк", "почта", "звонок",
+    ],
 }
 
 # Функции для работы с календарем и анализом запросов
@@ -786,136 +788,92 @@ def auto_assign_category(title: str, description: str = "") -> str:
     Автоматически определяет категорию задачи на основе её названия и описания.
     Возвращает наиболее подходящую категорию из списка CATEGORIES.
     """
-    # Объединяем заголовок и описание для анализа
     text = f"{title} {description}".lower().strip()
 
     if not text:
         return "Личное"
 
-    # Считаем совпадения ключевых слов для каждой категории
-    scores = {}
+    scores: dict[str, int] = {}
     for category, keywords in CATEGORY_KEYWORDS.items():
         score = 0
         for keyword in keywords:
-            # Считаем количество вхождений ключевого слова
-            count = text.count(keyword.lower())
-            score += count
-            # Даем бонус за точное совпадение слов
-            if f" {keyword.lower()} " in f" {text} ":
-                score += 1
+            kw = keyword.lower()
+            if not kw:
+                continue
+            # количество вхождений + бонус за отдельные слова
+            score += text.count(kw)
+            if f" {kw} " in f" {text} ":
+                score += 2
         scores[category] = score
 
-    # Выбираем категорию с максимальным счетом
-    best_category = max(scores.items(), key=lambda x: x[1])
-
-    # Если счет равен 0, возвращаем "Личное" как категорию по умолчанию
-    if best_category[1] == 0:
+    best_category, best_score = max(scores.items(), key=lambda x: x[1])
+    if best_score <= 0:
         return "Личное"
+    return best_category
 
-    return best_category[0]
 
-
-def suggest_optimal_time(date, description, existing_events, priority="medium"):
+def suggest_optimal_time(date, description, existing_events, priority: str = "medium"):
     """
-    Предлагает оптимальное время для события на основе занятости, типа события и приоритета.
-    Учитывает предпочтения пользователя и реальную загруженность дня.
+    Предлагает *конкретное время* начала события внутри свободных слотов.
+    Не возвращает 09:00 по умолчанию, а подбирает час в пределах свободного окна.
     """
     free_slots = get_free_slots_for_date(date, existing_events)
-
     if not free_slots:
         return None
 
-    # Анализируем тип события для выбора оптимального времени
-    event_type = description.lower()
+    event_type = (description or "").lower()
 
-    # Определяем категории и их предпочтительное время
-    time_preferences = {
-        'work': {
-            'preferred_hours': [9, 10, 11, 14, 15, 16],  # рабочие часы
-            'min_duration': 1.0,
-            'avoid_hours': [12, 13]  # обеденное время
-        },
-        'meeting': {
-            'preferred_hours': [9, 10, 11, 14, 15, 16],
-            'min_duration': 1.0,
-            'avoid_hours': [12, 13]
-        },
-        'lunch': {
-            'preferred_hours': [12, 13, 14],
-            'min_duration': 0.5,
-            'avoid_hours': []
-        },
-        'sport': {
-            'preferred_hours': [7, 8, 9, 18, 19, 20],  # утро или вечер
-            'min_duration': 1.0,
-            'avoid_hours': []
-        },
-        'health': {
-            'preferred_hours': [8, 9, 10, 17, 18, 19],
-            'min_duration': 0.5,
-            'avoid_hours': []
-        },
-        'shopping': {
-            'preferred_hours': [10, 11, 15, 16, 17, 18, 19],
-            'min_duration': 0.5,
-            'avoid_hours': [12, 13, 14]  # обед
-        },
-        'personal': {
-            'preferred_hours': [9, 10, 11, 14, 15, 16, 17, 18, 19],
-            'min_duration': 0.5,
-            'avoid_hours': []
-        }
+    # Предпочитаемые часы для разных типов задач
+    time_prefs_by_category = {
+        "work": [9, 10, 11, 14, 15, 16],
+        "lunch": [12, 13, 14],
+        "sport": [7, 8, 18, 19, 20],
+        "health": [9, 10, 11, 17, 18],
+        "shopping": [11, 12, 17, 18, 19],
+        "personal": [10, 11, 17, 18, 19],
     }
 
-    # Определяем категорию события
-    category = 'personal'  # по умолчанию
-    if any(word in event_type for word in ['встреча', 'совещание', 'митинг', 'meeting', 'работа', 'проект', 'бизнес']):
-        category = 'work'
-    elif any(word in event_type for word in ['обед', 'перерыв', 'пауза', 'кушать', 'поесть']):
-        category = 'lunch'
-    elif any(word in event_type for word in ['спорт', 'тренировка', 'бег', 'фитнес', 'зал', 'пробежка']):
-        category = 'sport'
-    elif any(word in event_type for word in ['врач', 'больница', 'аптека', 'здоровье', 'мед']):
-        category = 'health'
-    elif any(word in event_type for word in ['купить', 'магазин', 'покупки', 'шопинг']):
-        category = 'shopping'
+    # Определяем категорию для подбора времени
+    if any(w in event_type for w in ["встреча", "совещание", "митинг", "meeting", "работа", "проект", "бизнес"]):
+        category = "work"
+    elif any(w in event_type for w in ["обед", "перерыв", "пауза", "кушать", "поесть"]):
+        category = "lunch"
+    elif any(w in event_type for w in ["спорт", "тренировка", "бег", "фитнес", "зал", "пробежка"]):
+        category = "sport"
+    elif any(w in event_type for w in ["врач", "больница", "аптека", "здоровье", "мед"]):
+        category = "health"
+    elif any(w in event_type for w in ["купить", "магазин", "покупки", "шопинг"]):
+        category = "shopping"
+    else:
+        category = "personal"
 
-    prefs = time_preferences[category]
+    preferred_hours = time_prefs_by_category[category]
 
-    # Фильтруем слоты по предпочтениям
-    preferred_slots = []
+    # Строим список всех допустимых кандидатов времени (datetime) внутри свободных слотов
+    candidates = []
     for slot in free_slots:
-        if slot['duration_hours'] >= prefs['min_duration']:
-            slot_hour = slot['start'].hour
-            if slot_hour in prefs['preferred_hours'] and slot_hour not in prefs['avoid_hours']:
-                preferred_slots.append(slot)
+        start_hour = slot["start"].hour
+        end_hour = slot["end"].hour
+        for h in preferred_hours:
+            if start_hour <= h < end_hour:
+                candidates.append(datetime.combine(date, datetime.strptime(f"{h:02d}:00", "%H:%M").time()))
 
-    # Если есть предпочтительные слоты, выбираем лучший
-    if preferred_slots:
-        # Для высокого приоритета - выбираем самое раннее время
-        if priority == "high":
-            return min(preferred_slots, key=lambda x: x['start'])['start']
-        # Для низкого приоритета - выбираем более позднее время
-        elif priority == "low":
-            return max(preferred_slots, key=lambda x: x['start'])['start']
-        # Для среднего - выбираем оптимальное (не слишком рано, не слишком поздно)
-        else:
-            # Предпочитаем слоты в середине дня
-            midday_slots = [s for s in preferred_slots if 10 <= s['start'].hour <= 16]
-            if midday_slots:
-                return min(midday_slots, key=lambda x: x['start'])['start']
-            return preferred_slots[0]['start']
+    # Если ничего из предпочтительных часов не подходит — возьмём середину первого слота
+    if not candidates:
+        first_slot = free_slots[0]
+        mid_ts = first_slot["start"] + (first_slot["end"] - first_slot["start"]) / 2
+        return mid_ts
 
-    # Если нет предпочтительных слотов, берем первый доступный
-    suitable_slots = [slot for slot in free_slots if slot['duration_hours'] >= prefs['min_duration']]
-    if suitable_slots:
-        return suitable_slots[0]['start']
+    candidates.sort()
 
-    # Если совсем ничего нет, берем любой слот
-    if free_slots:
-        return free_slots[0]['start']
+    if priority == "high":
+        return candidates[0]
+    if priority == "low":
+        return candidates[-1]
 
-    return None
+    # Для среднего приоритета берём ближайшее к 15:00
+    target = datetime.combine(date, datetime.strptime("15:00", "%H:%M").time())
+    return min(candidates, key=lambda dt: abs(dt - target))
 
 
 def get_token():
