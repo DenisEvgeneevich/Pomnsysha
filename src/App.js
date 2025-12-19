@@ -253,3 +253,5 @@ const Footer = ({ setCurrentPage }) => (
 );
 
 export default App;
+
+
