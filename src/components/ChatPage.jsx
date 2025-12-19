@@ -111,8 +111,34 @@ const ChatPage = ({ onBack }) => {
         ? (botResponse.content ?? botResponse.reply ?? botResponse.text ?? JSON.stringify(botResponse))
         : botResponse;
 
-      // Обработка proposal от ИИ
-      if (respType === 'proposal' && botResponse.structured && botResponse.structured.processed_task) {
+      // Обработка availability_result (запросы о свободном времени)
+      // ВАЖНО: availability_result НЕ создаёт события, НЕ показывает кнопки!
+      if (respType === 'availability_result' || (botResponse && botResponse.type === 'availability_result')) {
+        const availData = botResponse;
+        const slots = availData.slots || [];
+        const message = availData.message || 'Свободные окна не найдены';
+        const hintCommand = availData.hint_command || null;
+        
+        // Формируем текст с информацией о слотах
+        let fullText = message;
+        if (slots.length > 0) {
+          fullText += '\n\nДоступные окна:';
+          slots.forEach((slot, idx) => {
+            const date = new Date(slot.date).toLocaleDateString('ru-RU');
+            fullText += `\n${idx + 1}. ${date} ${slot.start}–${slot.end}`;
+          });
+        }
+        if (hintCommand) {
+          fullText += `\n\n💡 ${hintCommand}`;
+        }
+        
+        botMsg = {
+          id: Date.now() + 1,
+          text: fullText,
+          isUser: false,
+          timestamp: new Date()
+        };
+      } else if (respType === 'proposal' && botResponse.structured && botResponse.structured.processed_task) {
         const processed = botResponse.structured.processed_task;
         const dateStr = processed.date;
         const timeStr = processed.time || botResponse.suggested_time || null;
@@ -134,24 +160,31 @@ const ChatPage = ({ onBack }) => {
             otherTimeValue: ''
           }
         };
-      } else if (respType === 'event_suggestion' || respType === 'event' || (botResponse && botResponse.data && botResponse.data.suggested_time)) {
-        const eventData = (botResponse && botResponse.data) || {};
-        const dateVal = eventData.date ? (typeof eventData.date === 'string' ? new Date(eventData.date) : eventData.date) : null;
-        const suggested = eventData.suggested_time ? (typeof eventData.suggested_time === 'string' ? new Date(eventData.suggested_time) : eventData.suggested_time) : null;
-
-        const dateDisplay = dateVal ? dateVal.toLocaleDateString('ru-RU') : (eventData.date || '');
-        const suggestedTimeDisplay = suggested ? suggested.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : (eventData.suggested_time || '');
-
+      } else if (respType === 'event_suggestion' || (botResponse && botResponse.type === 'event_suggestion')) {
+        // Новый контракт event_suggestion
+        const eventData = botResponse;
+        const title = eventData.title || 'Событие';
+        const date = eventData.date || '';
+        const start = eventData.start || '';
+        const durationMin = eventData.duration_min || 60;
+        const category = eventData.category || 'Личное';
+        const idempotencyKey = eventData.idempotency_key || null;
+        
+        const dateDisplay = date ? new Date(date).toLocaleDateString('ru-RU') : '';
+        
         botMsg = {
           id: Date.now() + 1,
-          text: `Предлагаю добавить событие "${eventData.description ?? eventData.title ?? respContent}" на ${dateDisplay} в ${suggestedTimeDisplay}.\n\nСвободных слотов на эту дату: ${eventData.free_slots_count ?? ''}`,
+          text: `Предлагаю добавить: "${title}" на ${dateDisplay} в ${start} (${durationMin} минут). Категория: ${category}`,
           isUser: false,
           timestamp: new Date(),
           eventSuggestion: {
-            date: eventData.date ?? (dateVal ? formatDateLocal(dateVal) : null),
-            time: suggested ? formatTimeLocal(suggested) : (typeof eventData.suggested_time === 'string' ? eventData.suggested_time : null),
-            description: eventData.description ?? eventData.title ?? respContent,
-            suggestedTime: suggested || null,
+            date: date,
+            time: start,
+            description: title,
+            category: category,
+            duration_min: durationMin,
+            idempotency_key: idempotencyKey,
+            suggestedTime: start,
             showOtherTimeInput: false,
             otherTimeValue: ''
           }
@@ -205,7 +238,13 @@ const ChatPage = ({ onBack }) => {
     setIsLoading(true);
 
     try {
-      const result = await confirmEventCreation(eventData);
+      // Добавляем idempotency_key и duration_min если есть
+      const eventDataWithKey = {
+        ...eventData,
+        idempotency_key: eventData.idempotency_key || null,
+        duration_min: eventData.duration_min || 60
+      };
+      const result = await confirmEventCreation(eventDataWithKey);
 
       const confirmMsg = {
         id: Date.now() + 2,
@@ -279,7 +318,9 @@ const ChatPage = ({ onBack }) => {
                       onClick={() => handleConfirmEvent(m.id, {
                         date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
                         time: m.eventSuggestion.time, // HH:MM
-                        description: m.eventSuggestion.description
+                        description: m.eventSuggestion.description,
+                        duration_min: m.eventSuggestion.duration_min || 60,
+                        idempotency_key: m.eventSuggestion.idempotency_key || null
                       })}
                       disabled={isLoading}
                     >
@@ -380,7 +421,9 @@ const ChatPage = ({ onBack }) => {
                         onClick={() => handleConfirmEvent(m.id, {
                           date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
                           time: m.eventSuggestion.time,
-                          description: m.eventSuggestion.description
+                          description: m.eventSuggestion.description,
+                          duration_min: m.eventSuggestion.duration_min || 60,
+                          idempotency_key: m.eventSuggestion.idempotency_key || null
                         })}
                         disabled={isLoading}
                       >

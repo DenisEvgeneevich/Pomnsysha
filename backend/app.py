@@ -30,7 +30,7 @@ from backend.google_calendar import (
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request as GoogleRequest
 
-from backend.ai import ask_gigachat, auto_assign_category
+from backend.ai import ask_gigachat, auto_assign_category, has_conflict, DEFAULT_EVENT_DURATION_MIN, generate_idempotency_key
 
 
 CLIENT_SECRETS_FILE = os.path.join("secrets", "client_secret.json")
@@ -848,6 +848,8 @@ def confirm_event(data: Dict[str, Any], request: Request, response: Response, db
         date_str = data.get("date")
         time_str = data.get("time")
         description = data.get("description", "")
+        duration_min = data.get("duration_min", DEFAULT_EVENT_DURATION_MIN)
+        idempotency_key = data.get("idempotency_key")
 
         if not date_str or not time_str:
             return {"success": False, "message": "Не указаны дата или время"}
@@ -858,16 +860,68 @@ def confirm_event(data: Dict[str, Any], request: Request, response: Response, db
         except ValueError:
             return {"success": False, "message": "Неверный формат даты или времени"}
 
+        # Проверка дублей через idempotency_key
+        if idempotency_key:
+            # Проверяем, есть ли уже событие с таким ключом
+            # Fallback: проверка по (user_id, date, start, title) в пределах суток
+            target_date = event_datetime.date()
+            existing_duplicate = db.query(Event).filter(
+                Event.user_id == user_id,
+                Event.start_time >= datetime.combine(target_date, datetime.min.time()),
+                Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time()),
+                Event.title == description
+            ).first()
+            
+            if existing_duplicate:
+                # Событие уже существует - возвращаем успех с существующим ID
+                return {
+                    "success": True,
+                    "message": f"Событие '{description}' уже существует на {event_datetime.strftime('%d.%m.%Y %H:%M')}",
+                    "event_id": existing_duplicate.id
+                }
+
+        # Проверка конфликтов перед созданием
+        target_date = event_datetime.date()
+        existing_events = db.query(Event).filter(
+            Event.user_id == user_id,
+            Event.start_time >= datetime.combine(target_date, datetime.min.time()),
+            Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+        ).all()
+        
+        end_datetime = event_datetime + timedelta(minutes=duration_min)
+        if has_conflict(event_datetime, end_datetime, existing_events):
+            # Конфликт обнаружен - предлагаем альтернативы
+            from backend.ai import suggest_optimal_time_with_exclusions
+            alternative = suggest_optimal_time_with_exclusions(
+                target_date,
+                description,
+                existing_events,
+                "medium",
+                exclude_times=[time_str]
+            )
+            if alternative:
+                alt_str = alternative.strftime('%H:%M')
+                return {
+                    "success": False,
+                    "message": f"Время {time_str} занято. Предлагаю альтернативу: {alt_str}",
+                    "alternative_time": alt_str
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Время {time_str} занято, и нет других свободных окон на эту дату."
+                }
+
         # Автоматически определяем категорию
         category = auto_assign_category(description, description)
         
-        # Создаем событие
+        # Создаем событие с правильной длительностью
         new_event = Event(
             user_id=user_id,
             title=description,
             description=description,
             start_time=event_datetime,
-            end_time=event_datetime,  # Для простоты, события без длительности
+            end_time=end_datetime,  # Используем вычисленный end_time на основе duration_min
             source="ai_assistant",
             view=category
         )

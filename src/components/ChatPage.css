@@ -292,6 +292,57 @@
   border: 2px solid #C18F64;
 }
 
+/* Стили для availability-слотов (свободное время) */
+.availability-slots {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.availability-slot {
+  padding: 12px;
+  background-color: rgba(255, 249, 218, 0.3);
+  border-radius: 12px;
+  border: 1px solid #C18F64;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+}
+
+.slot-details {
+  flex: 1;
+  color: #573D27;
+  line-height: 1.4;
+  font-size: 14px;
+}
+
+.book-slot-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Montserrat', sans-serif;
+  background-color: #C18F64;
+  color: white;
+  white-space: nowrap;
+}
+
+.book-slot-btn:hover {
+  background-color: #A6754F;
+  transform: translateY(-2px);
+}
+
+.book-slot-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .event-details {
   margin-bottom: 15px;
   color: #573D27;

@@ -3,7 +3,9 @@ import os
 import re
 import uuid
 import ast
-from datetime import datetime, timedelta
+import hashlib
+from datetime import datetime, timedelta, time as dtime
+from typing import Literal, Optional, Dict, Any, List
 import time
 
 import requests
@@ -18,6 +20,9 @@ ACCESS_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
 TOKEN_CACHE = None
+
+# Дефолтная длительность события в минутах (если end_time отсутствует)
+DEFAULT_EVENT_DURATION_MIN = 60
 
 CATEGORIES = ["Работа", "Учеба", "Личное", "Здоровье", "Покупки", "Встречи"]
 PRIORITIES = {"high", "medium", "low"}
@@ -331,46 +336,73 @@ def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, 
     return True, processed_task, warnings
 
 
+def detect_intent(text: str) -> Literal["availability", "create_event", "chat"]:
+    """
+    Определяет намерение пользователя: availability (узнать свободное время),
+    create_event (создать событие) или chat (обычный чат).
+    
+    Правила:
+    - availability: ключевые слова о свободном времени/окнах/занятости
+    - create_event: явные глаголы создания + дата/время ИЛИ встреча/созвон + дата/время
+    - chat: всё остальное
+    """
+    text_lower = text.lower().strip()
+    
+    # Ключевые слова для availability (свободное время)
+    availability_keywords = [
+        'свобод', 'свободен', 'свободна', 'свободно', 'свободное время',
+        'окно', 'окна', 'слот', 'слоты', 'доступен', 'доступна', 'доступно',
+        'занят', 'занята', 'занято', 'занятость',
+        'когда я свободен', 'когда я свободна', 'когда свободен', 'когда свободна',
+        'есть ли свободное время', 'есть свободное время',
+        'найди свободное окно', 'найди свободные окна', 'назови все свободные окна',
+        'когда я могу', 'могу ли я', 'есть ли у меня время',
+        'когда у меня свободно', 'когда свободно', 'свободные промежутки'
+    ]
+    
+    # Ключевые слова для create_event (создание события)
+    # Обязательно явные глаголы намерения
+    create_event_verbs = [
+        'создай', 'создать', 'добавь', 'добавить', 'запланируй', 'запланировать',
+        'поставь', 'поставить', 'назначь', 'назначить', 'забронируй', 'забронировать',
+        'сделай встречу', 'сделать встречу', 'напомни', 'напомнить'
+    ]
+    
+    # Сущности событий + дата/время (только если есть конкретная дата/время)
+    event_nouns = ['встреча', 'созвон', 'звонок', 'митинг', 'совещание']
+    date_time_patterns = [
+        r'\d{1,2}[.\-]\d{1,2}',  # дд.мм или дд-мм
+        r'\d{1,2}[:\.]\d{2}',    # HH:MM или HH.MM
+        'сегодня', 'завтра', 'послезавтра', 'через день', 'через неделю'
+    ]
+    
+    # Проверка availability (приоритет выше, чтобы не путать с create_event)
+    has_availability = any(kw in text_lower for kw in availability_keywords)
+    
+    # Проверка create_event
+    has_create_verb = any(verb in text_lower for verb in create_event_verbs)
+    has_event_noun = any(noun in text_lower for noun in event_nouns)
+    has_date_time = any(re.search(pattern, text_lower) for pattern in date_time_patterns)
+    
+    # create_event: явный глагол ИЛИ (сущность события + дата/время)
+    is_create_event = has_create_verb or (has_event_noun and has_date_time)
+    
+    # Определение намерения
+    if has_availability:
+        return "availability"
+    elif is_create_event:
+        return "create_event"
+    else:
+        return "chat"
+
+
 def is_task_request(message: str) -> bool:
     """
-    Определяет, является ли сообщение запросом на создание задачи.
+    УПРОЩЕННАЯ версия: определяет только create_event (не availability).
+    Используется для обратной совместимости.
     """
-    message = message.lower().strip()
-
-    # Приветствия и общие фразы - не задачи
-    greetings = ['привет', 'здравствуй', 'добрый день', 'добрый вечер', 'доброе утро', 'хай', 'hello', 'hi', 'hey']
-    if any(message.startswith(g) or message == g for g in greetings):
-        return False
-
-    # Короткие подтверждения - не задачи
-    short_confirmations = ['да', 'давай', 'ок', 'окей', 'хорошо', 'согласен', 'согласна', 'ладно', 'понятно', 'ясно']
-    if message in short_confirmations:
-        return False
-
-    # Вопросы - не задачи (но могут содержать запросы на информацию)
-    if any(word in message for word in ['что', 'как', 'когда', 'где', 'почему', 'зачем', 'кто', 'сколько']):
-        return False
-
-    # Слова, указывающие на задачу
-    task_indicators = [
-        'сделай', 'сделать', 'создай', 'создать', 'запланируй', 'запланировать',
-        'напомни', 'напомнить', 'добавь', 'добавить', 'поставь', 'поставить',
-        'нужно', 'надо', 'требуется', 'необходимо', 'обязательно',
-        'встреча', 'совещание', 'митинг', 'звонок', 'позвонить',
-        'купить', 'приобрести', 'заказать', 'забронировать'
-    ]
-
-    # Временные маркеры - указывают на задачу
-    time_indicators = [
-        'сегодня', 'завтра', 'послезавтра', 'через', 'в', 'во', 'к',
-        'утром', 'вечером', 'днем', 'ночью', 'утро', 'вечер', 'день', 'ночь'
-    ]
-
-    has_task_word = any(word in message for word in task_indicators)
-    has_time_word = any(word in message for word in time_indicators)
-
-    # Если есть слова задач ИЛИ слова времени - считаем задачей
-    return has_task_word or has_time_word
+    intent = detect_intent(message)
+    return intent == "create_event"
 
 
 def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> dict:
@@ -739,46 +771,236 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         base_response["error"] = f"Ошибка при обработке запроса: {exc}"
         return base_response
 
-def get_free_slots_for_date(date, existing_events):
+def parse_availability_constraints(text: str) -> Dict[str, Any]:
+    """
+    Парсит ограничения времени из запроса о доступности.
+    Возвращает словарь с полями:
+    - duration_minutes: длительность слота (по умолчанию 30)
+    - date: конкретная дата или None
+    - date_range: (start_date, end_date) для диапазона или None
+    - time_window: (start_time, end_time) или None
+    - after_time: время "после" или None
+    - before_time: время "до" или None
+    """
+    text_lower = text.lower()
+    constraints = {
+        'duration_minutes': 30,  # дефолт
+        'date': None,
+        'date_range': None,
+        'time_window': None,
+        'after_time': None,
+        'before_time': None
+    }
+    
+    # Парсинг длительности
+    duration_patterns = [
+        (r'на\s+(\d+)\s+минут', lambda m: int(m.group(1))),
+        (r'(\d+)\s+минут', lambda m: int(m.group(1))),
+        (r'полчаса|30\s+минут', lambda m: 30),
+        (r'на\s+час|1\s+час|60\s+минут', lambda m: 60),
+        (r'на\s+(\d+)\s+часов?', lambda m: int(m.group(1)) * 60),
+        (r'(\d+)\s+часов?', lambda m: int(m.group(1)) * 60),
+    ]
+    for pattern, converter in duration_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            try:
+                constraints['duration_minutes'] = converter(match)
+                break
+            except:
+                pass
+    
+    # Парсинг даты
+    today = datetime.now().date()
+    date_patterns = {
+        'сегодня': today,
+        'завтра': today + timedelta(days=1),
+        'послезавтра': today + timedelta(days=2),
+    }
+    
+    for pattern, target_date in date_patterns.items():
+        if pattern in text_lower:
+            constraints['date'] = target_date
+            break
+    
+    # Парсинг "на этой неделе"
+    if 'на этой неделе' in text_lower or 'на неделе' in text_lower:
+        # От понедельника до воскресенья текущей недели
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+        week_end = week_start + timedelta(days=6)
+        constraints['date_range'] = (week_start, week_end)
+    
+    # Парсинг числовых дат (дд.мм или дд-мм)
+    date_match = re.search(r'(\d{1,2})[.\-](\d{1,2})(?:[.\-](\d{2,4}))?', text)
+    if date_match and not constraints['date']:
+        day, month = int(date_match.group(1)), int(date_match.group(2))
+        year = int(date_match.group(3)) if date_match.group(3) else today.year
+        if year < 100:
+            year += 2000
+        try:
+            constraints['date'] = datetime(year, month, day).date()
+        except ValueError:
+            pass
+    
+    # Парсинг временных окон
+    time_windows = {
+        'утром': (dtime(9, 0), dtime(12, 0)),
+        'днем': (dtime(12, 0), dtime(17, 0)),
+        'вечером': (dtime(17, 0), dtime(21, 0)),
+        'ночью': (dtime(21, 0), dtime(9, 0)),  # особый случай
+    }
+    
+    for keyword, (start_t, end_t) in time_windows.items():
+        if keyword in text_lower:
+            constraints['time_window'] = (start_t, end_t)
+            break
+    
+    # Парсинг "после HH:MM" или "после HH"
+    after_match = re.search(r'после\s+(\d{1,2})(?:[:\.](\d{2}))?', text_lower)
+    if after_match:
+        hour = int(after_match.group(1))
+        minute = int(after_match.group(2)) if after_match.group(2) else 0
+        try:
+            constraints['after_time'] = dtime(hour, minute)
+        except ValueError:
+            pass
+    
+    # Парсинг "до HH:MM" или "до HH"
+    before_match = re.search(r'до\s+(\d{1,2})(?:[:\.](\d{2}))?', text_lower)
+    if before_match:
+        hour = int(before_match.group(1))
+        minute = int(before_match.group(2)) if before_match.group(2) else 0
+        try:
+            constraints['before_time'] = dtime(hour, minute)
+        except ValueError:
+            pass
+    
+    return constraints
+
+
+def generate_idempotency_key(user_id: int, title: str, date: str, start: str, duration_min: int) -> str:
+    """
+    Генерирует idempotency_key для предотвращения дублей событий.
+    
+    Args:
+        user_id: ID пользователя
+        title: название события
+        date: дата в формате YYYY-MM-DD
+        start: время начала в формате HH:MM
+        duration_min: длительность в минутах
+    
+    Returns:
+        SHA256 хеш строки
+    """
+    key_string = f"{user_id}|{title}|{date}|{start}|{duration_min}"
+    return hashlib.sha256(key_string.encode('utf-8')).hexdigest()
+
+
+def has_conflict(start_dt: datetime, end_dt: datetime, existing_events: List) -> bool:
+    """
+    Проверяет конфликт между новым событием (start_dt, end_dt) и существующими событиями.
+    
+    Args:
+        start_dt: начало нового события
+        end_dt: конец нового события
+        existing_events: список существующих событий (с полями start_time, end_time или duration_min)
+    
+    Returns:
+        True если есть конфликт (пересечение интервалов)
+    """
+    for event in existing_events:
+        event_start = event.start_time
+        # Если end_time отсутствует, используем дефолтную длительность
+        if event.end_time:
+            event_end = event.end_time
+        else:
+            # Используем duration_min если есть, иначе DEFAULT_EVENT_DURATION_MIN
+            duration_min = getattr(event, 'duration_min', None) or DEFAULT_EVENT_DURATION_MIN
+            event_end = event_start + timedelta(minutes=duration_min)
+        
+        # Конфликт если интервалы пересекаются
+        # start < existing_end AND end > existing_start
+        if start_dt < event_end and end_dt > event_start:
+            return True
+    
+    return False
+
+
+def get_free_slots_for_date(date, existing_events, min_duration_minutes: int = 30, 
+                            work_start: dtime = dtime(9, 0), work_end: dtime = dtime(18, 0),
+                            after_time: Optional[dtime] = None, before_time: Optional[dtime] = None):
     """
     Находит свободные временные слоты на заданную дату.
-    Возвращает список доступных временных интервалов.
+    
+    Args:
+        date: дата для поиска слотов
+        existing_events: список существующих событий
+        min_duration_minutes: минимальная длительность слота (по умолчанию 30)
+        work_start: начало рабочего дня (по умолчанию 09:00)
+        work_end: конец рабочего дня (по умолчанию 18:00)
+        after_time: не возвращать слоты до этого времени
+        before_time: не возвращать слоты после этого времени
+    
+    Returns:
+        Список словарей с полями: start, end, duration_minutes
     """
-    # Рабочие часы: 9:00 - 18:00
-    work_start = datetime.combine(date, datetime.strptime("09:00", "%H:%M").time())
-    work_end = datetime.combine(date, datetime.strptime("18:00", "%H:%M").time())
+    # Применяем ограничения времени
+    # ВАЖНО: если after_time > 18:00, расширяем рабочие часы до 23:59
+    effective_start = work_start
+    effective_end = work_end
+    
+    if after_time:
+        effective_start = max(effective_start, after_time)
+        # Если after_time > 18:00, расширяем рабочие часы
+        if after_time > work_end:
+            effective_end = dtime(23, 59)
+    if before_time:
+        effective_end = min(effective_end, before_time)
+    
+    work_start_dt = datetime.combine(date, effective_start)
+    work_end_dt = datetime.combine(date, effective_end)
+    
+    # Если after_time > before_time, нет доступных слотов
+    if effective_start >= effective_end:
+        return []
 
     # Сортируем существующие события по времени
     sorted_events = sorted(existing_events, key=lambda x: x.start_time)
 
     free_slots = []
-    current_time = work_start
+    current_time = work_start_dt
 
     for event in sorted_events:
         event_start = event.start_time
-        event_end = event.end_time or event.start_time  # Если end_time не указан, считаем событие точечным
+        # Если end_time не указан, используем duration_min или DEFAULT_EVENT_DURATION_MIN
+        if event.end_time:
+            event_end = event.end_time
+        else:
+            duration_min = getattr(event, 'duration_min', None) or DEFAULT_EVENT_DURATION_MIN
+            event_end = event_start + timedelta(minutes=duration_min)
 
         # Если событие начинается после текущего времени, добавляем свободный слот
         if event_start > current_time:
-            slot_duration = (event_start - current_time).total_seconds() / 3600  # в часах
-            if slot_duration >= 0.5:  # Минимум 30 минут
+            slot_duration_minutes = (event_start - current_time).total_seconds() / 60
+            if slot_duration_minutes >= min_duration_minutes:
                 free_slots.append({
                     'start': current_time,
                     'end': event_start,
-                    'duration_hours': slot_duration
+                    'duration_minutes': int(slot_duration_minutes)
                 })
 
         # Обновляем текущее время на конец события
         current_time = max(current_time, event_end)
 
     # Добавляем слот после последнего события до конца рабочего дня
-    if current_time < work_end:
-        slot_duration = (work_end - current_time).total_seconds() / 3600
-        if slot_duration >= 0.5:
+    if current_time < work_end_dt:
+        slot_duration_minutes = (work_end_dt - current_time).total_seconds() / 60
+        if slot_duration_minutes >= min_duration_minutes:
             free_slots.append({
                 'start': current_time,
-                'end': work_end,
-                'duration_hours': slot_duration
+                'end': work_end_dt,
+                'duration_minutes': int(slot_duration_minutes)
             })
 
     return free_slots
@@ -810,6 +1032,315 @@ def auto_assign_category(title: str, description: str = "") -> str:
     if best_score <= 0:
         return "Личное"
     return best_category
+
+
+def handle_availability_request(text: str, db_session, user_id: int) -> Dict[str, Any]:
+    """
+    Обрабатывает запрос о свободном времени (availability).
+    ВАЖНО: НЕ создаёт события, только показывает доступность.
+    
+    Returns:
+        dict с полями (строгий контракт):
+        - type: "availability_result"
+        - message: человекочитаемый текст ответа
+        - slots: список слотов [{"date": "YYYY-MM-DD", "start": "HH:MM", "end": "HH:MM"}]
+        - hint_command: подсказка-команда для создания события (если есть слоты)
+        - constraints: информация об ограничениях
+        - reason: объяснение если слотов нет (null если есть)
+    """
+    from backend.database import Event
+    
+    text_lower = text.lower()
+    
+    # Определяем режим: point (ближайшее окно) или range (когда свободен)
+    range_keywords = ['когда я свободен', 'когда свободен', 'в какое время свободен', 
+                      'когда у меня свободно', 'когда свободно']
+    availability_mode = "range" if any(kw in text_lower for kw in range_keywords) else "point"
+    
+    constraints = parse_availability_constraints(text)
+    duration_minutes = constraints['duration_minutes']
+    
+    # Определяем диапазон дат для поиска
+    target_dates = []
+    if constraints['date']:
+        target_dates = [constraints['date']]
+    elif constraints['date_range']:
+        start_date, end_date = constraints['date_range']
+        current = start_date
+        while current <= end_date:
+            target_dates.append(current)
+            current += timedelta(days=1)
+    else:
+        # По умолчанию - сегодня
+        target_dates = [datetime.now().date()]
+    
+    # Собираем все события для целевых дат
+    all_raw_slots = []
+    for target_date in target_dates:
+        existing_events = db_session.query(Event).filter(
+            Event.user_id == user_id,
+            Event.start_time >= datetime.combine(target_date, datetime.min.time()),
+            Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+        ).all()
+        
+        # Получаем свободные слоты с учетом ограничений
+        slots = get_free_slots_for_date(
+            target_date,
+            existing_events,
+            min_duration_minutes=duration_minutes,
+            after_time=constraints['after_time'],
+            before_time=constraints['before_time']
+        )
+        
+        # Фильтруем по time_window если указан
+        if constraints['time_window']:
+            start_t, end_t = constraints['time_window']
+            filtered_slots = []
+            for slot in slots:
+                slot_start_time = slot['start'].time()
+                # Особый случай для "ночью" (21:00-09:00)
+                if start_t > end_t:  # ночь
+                    if slot_start_time >= start_t or slot_start_time < end_t:
+                        filtered_slots.append(slot)
+                else:
+                    if start_t <= slot_start_time < end_t:
+                        filtered_slots.append(slot)
+            slots = filtered_slots
+        
+        all_raw_slots.extend(slots)
+    
+    # НОРМАЛИЗАЦИЯ: обрезаем слоты до запрошенной длительности
+    # Даже если свободно 9 часов, показываем только нужную длительность
+    normalized_slots = []
+    for slot in all_raw_slots:
+        if slot['duration_minutes'] >= duration_minutes:
+            # Обрезаем слот до запрошенной длительности
+            slot_start = slot['start']
+            slot_end = slot_start + timedelta(minutes=duration_minutes)
+            normalized_slots.append({
+                'start': slot_start,
+                'end': slot_end,
+                'duration_minutes': duration_minutes,
+                'date': slot_start.date()
+            })
+    
+    # Формируем ответ если слотов нет
+    if not normalized_slots:
+        reason_parts = []
+        if constraints['after_time']:
+            time_str = constraints['after_time'].strftime('%H:%M')
+            reason_parts.append(f"после {time_str}")
+        if constraints['before_time']:
+            time_str = constraints['before_time'].strftime('%H:%M')
+            reason_parts.append(f"до {time_str}")
+        if constraints['time_window']:
+            start_t, end_t = constraints['time_window']
+            if start_t > end_t:  # ночь
+                reason_parts.append("ночью")
+            elif start_t == dtime(9, 0) and end_t == dtime(12, 0):
+                reason_parts.append("утром")
+            elif start_t == dtime(12, 0) and end_t == dtime(17, 0):
+                reason_parts.append("днём")
+            elif start_t == dtime(17, 0) and end_t == dtime(21, 0):
+                reason_parts.append("вечером")
+        
+        reason_text = f" {' '.join(reason_parts)}" if reason_parts else ""
+        date_text = ""
+        if constraints['date']:
+            date_obj = constraints['date']
+            if date_obj == datetime.now().date():
+                date_text = "сегодня"
+            elif date_obj == datetime.now().date() + timedelta(days=1):
+                date_text = "завтра"
+            else:
+                date_text = date_obj.strftime('%d.%m.%Y')
+        
+        text_response = f"К сожалению,{reason_text} нет свободных интервалов длительностью ≥ {duration_minutes} минут."
+        if date_text:
+            text_response = f"К сожалению, {date_text}{reason_text} нет свободных интервалов длительностью ≥ {duration_minutes} минут."
+        text_response += f"\nПопробуйте уменьшить длительность или выбрать другую дату."
+        
+        # Формируем constraints для ответа
+        constraints_dict = {
+            "duration_min": duration_minutes
+        }
+        if constraints['date']:
+            date_str = constraints['date'].isoformat()
+            constraints_dict["date_range"] = {"start": date_str, "end": date_str}
+        elif constraints['date_range']:
+            start_date, end_date = constraints['date_range']
+            constraints_dict["date_range"] = {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }
+        if constraints['time_window']:
+            start_t, end_t = constraints['time_window']
+            constraints_dict["time_window"] = {
+                "start": start_t.strftime('%H:%M'),
+                "end": end_t.strftime('%H:%M')
+            }
+        
+        return {
+            'type': 'availability_result',
+            'message': text_response,
+            'slots': [],
+            'hint_command': None,
+            'constraints': constraints_dict,
+            'reason': f"Нет свободных интервалов ≥ {duration_minutes} минут{reason_text}"
+        }
+    
+    # Сортируем слоты по времени начала
+    normalized_slots.sort(key=lambda x: x['start'])
+    
+    # Ограничиваем количество слотов
+    wants_all = 'все' in text_lower or 'назови все' in text_lower or 'все окна' in text_lower
+    max_slots = len(normalized_slots) if wants_all else min(3, len(normalized_slots))
+    selected_slots = normalized_slots[:max_slots]
+    
+    # Формируем текстовый ответ в зависимости от режима
+    if availability_mode == "range":
+        # Режим "когда я свободен" - показываем диапазоны
+        text_response = _format_range_response(selected_slots, constraints, duration_minutes)
+    else:
+        # Режим "ближайшее окно" - показываем конкретные слоты
+        text_response = _format_point_response(selected_slots, constraints, duration_minutes)
+    
+    # Преобразуем слоты в формат для фронта согласно контракту
+    slots_for_frontend = []
+    for slot in selected_slots:
+        slots_for_frontend.append({
+            'date': slot['date'].isoformat(),
+            'start': slot['start'].strftime('%H:%M'),
+            'end': slot['end'].strftime('%H:%M')
+        })
+    
+    # Генерируем hint_command по первому слоту (вариант 2)
+    hint_command = None
+    if selected_slots:
+        first_slot = selected_slots[0]
+        date_str = first_slot['date'].strftime('%d.%m.%Y')
+        start_str = first_slot['start'].strftime('%H:%M')
+        hint_command = f"Если хочешь поставить встречу в это время, напиши: «Создай встречу {date_str} в {start_str} на {duration_minutes} минут»"
+    
+    # Формируем constraints для ответа
+    constraints_dict = {
+        "duration_min": duration_minutes
+    }
+    if constraints['date']:
+        date_str = constraints['date'].isoformat()
+        constraints_dict["date_range"] = {"start": date_str, "end": date_str}
+    elif constraints['date_range']:
+        start_date, end_date = constraints['date_range']
+        constraints_dict["date_range"] = {
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat()
+        }
+    if constraints['time_window']:
+        start_t, end_t = constraints['time_window']
+        constraints_dict["time_window"] = {
+            "start": start_t.strftime('%H:%M'),
+            "end": end_t.strftime('%H:%M')
+        }
+    
+    return {
+        'type': 'availability_result',
+        'message': text_response,
+        'slots': slots_for_frontend,
+        'hint_command': hint_command,
+        'constraints': constraints_dict,
+        'reason': None
+    }
+
+
+def _format_range_response(slots: List[Dict], constraints: Dict, duration_minutes: int) -> str:
+    """Форматирует ответ для режима 'range' (когда я свободен)"""
+    if not slots:
+        return ""
+    
+    # Группируем слоты по датам
+    slots_by_date = {}
+    for slot in slots:
+        date_key = slot['date']
+        if date_key not in slots_by_date:
+            slots_by_date[date_key] = []
+        slots_by_date[date_key].append(slot)
+    
+    # Форматируем дату
+    def format_date(date_obj):
+        today = datetime.now().date()
+        if date_obj == today:
+            return "сегодня"
+        elif date_obj == today + timedelta(days=1):
+            return "завтра"
+        else:
+            return date_obj.strftime('%d.%m.%Y')
+    
+    # Форматируем время окна
+    def format_time_window(slot):
+        start_str = slot['start'].strftime('%H:%M')
+        end_str = slot['end'].strftime('%H:%M')
+        return f"{start_str}–{end_str}"
+    
+    parts = []
+    for date_key in sorted(slots_by_date.keys()):
+        date_slots = slots_by_date[date_key]
+        date_text = format_date(date_key)
+        
+        # Определяем период дня если есть
+        period_text = ""
+        if constraints.get('time_window'):
+            start_t, end_t = constraints['time_window']
+            if start_t == dtime(9, 0) and end_t == dtime(12, 0):
+                period_text = " утром"
+            elif start_t == dtime(12, 0) and end_t == dtime(17, 0):
+                period_text = " днём"
+            elif start_t == dtime(17, 0) and end_t == dtime(21, 0):
+                period_text = " вечером"
+        
+        if len(date_slots) == 1:
+            # Одно окно
+            slot = date_slots[0]
+            time_window = format_time_window(slot)
+            parts.append(f"{date_text}{period_text} ты свободен с {time_window}")
+        else:
+            # Несколько окон
+            time_windows = [format_time_window(s) for s in date_slots]
+            parts.append(f"{date_text}{period_text} ты свободен: {', '.join(time_windows)}")
+    
+    if len(parts) == 1:
+        return parts[0] + "."
+    else:
+        return "Я нашёл свободные окна:\n" + "\n".join(f"• {p}" for p in parts)
+
+
+def _format_point_response(slots: List[Dict], constraints: Dict, duration_minutes: int) -> str:
+    """Форматирует ответ для режима 'point' (ближайшее окно)"""
+    if not slots:
+        return ""
+    
+    def format_date(date_obj):
+        today = datetime.now().date()
+        if date_obj == today:
+            return "сегодня"
+        elif date_obj == today + timedelta(days=1):
+            return "завтра"
+        else:
+            return date_obj.strftime('%d.%m.%Y')
+    
+    def format_slot(slot):
+        date_text = format_date(slot['date'])
+        start_str = slot['start'].strftime('%H:%M')
+        end_str = slot['end'].strftime('%H:%M')
+        return f"{date_text} {start_str}–{end_str}"
+    
+    if len(slots) == 1:
+        slot = slots[0]
+        return f"Ближайшее свободное окно: {format_slot(slot)}."
+    else:
+        text = f"Я нашёл {len(slots)} свободных окна:\n"
+        for i, slot in enumerate(slots, 1):
+            text += f"• {format_slot(slot)}\n"
+        return text.strip()
 
 
 def suggest_optimal_time(date, description, existing_events, priority: str = "medium"):
@@ -970,8 +1501,10 @@ def get_token():
 
 def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
     """
-    Расширенная версия ask_gigachat, которая может обрабатывать запросы на создание событий.
-    Возвращает dict с типом ответа и данными.
+    Расширенная версия ask_gigachat с правильной обработкой intent'ов:
+    - availability: запросы о свободном времени
+    - create_event: создание события
+    - chat: обычный чат
     """
     # Перезагружаем переменные окружения при каждом вызове
     load_dotenv()
@@ -982,159 +1515,191 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
     global TOKEN_CACHE
     TOKEN_CACHE = None
 
-    # Сначала проверяем, является ли сообщение запросом на создание события
-    if db_session and user_id:
-        # Проверяем, является ли сообщение задачей
-        if not is_task_request(message):
-            # Это не задача - переходим к обычному чату
-            pass  # код ниже обработает как обычный чат
+    # Определяем намерение пользователя
+    intent = detect_intent(message)
+    
+    # Обработка availability-запросов
+    if intent == "availability":
+        if db_session and user_id:
+            try:
+                return handle_availability_request(message, db_session, user_id)
+            except Exception as e:
+                return {
+                    'type': 'text',
+                    'content': f'Ошибка при поиске свободного времени: {str(e)}'
+                }
         else:
-            event_request = parse_event_request(message)
-            if event_request:
-                # Это запрос на создание события
-                target_date = event_request['date']
-                description = event_request['description']
-
-                # Получаем существующие события на эту дату
+            return {
+                'type': 'text',
+                'content': 'Для поиска свободного времени требуется авторизация.'
+            }
+    
+    # Обработка create_event-запросов
+    if intent == "create_event":
+        # Если есть сессия БД — передаём существующие таски в модель как контекст
+        existing_tasks = None
+        if db_session is not None and user_id is not None:
+            try:
                 from backend.database import Event
+                evs = db_session.query(Event).filter(Event.user_id == user_id).all()
+                existing_tasks = []
+                for e in evs:
+                    existing_tasks.append({
+                        'id': e.id,
+                        'title': e.title,
+                        'start': e.start_time.isoformat() if e.start_time else None,
+                        'end': e.end_time.isoformat() if e.end_time else None,
+                        'source': e.source,
+                        'external_id': e.external_id
+                    })
+            except Exception:
+                existing_tasks = None
+        
+        # Используем extract_task_via_gigachat для создания события
+        structured = extract_task_via_gigachat(message, existing_tasks=existing_tasks)
+
+        # Если модель вернула удачно распознанную задачу — предложим пользователю подтверждение
+        if structured.get("success"):
+            processed = structured["processed_task"] or {}
+            
+            from backend.database import Event
+            
+            # Определяем параметры события
+            title = processed.get("title", "Событие")
+            date_str = processed.get('date')
+            time_str = processed.get('time')
+            category = processed.get('category', 'Личное')
+            priority = processed.get('priority', 'medium')
+            
+            # Определяем длительность
+            duration_min = DEFAULT_EVENT_DURATION_MIN
+            if 'duration_minutes' in processed:
+                duration_min = processed['duration_minutes']
+            elif 'duration_min' in processed:
+                duration_min = processed['duration_min']
+            
+            # Если дата не указана, используем сегодня
+            if not date_str:
+                date_obj = datetime.now().date()
+            else:
+                try:
+                    date_obj = datetime.fromisoformat(date_str).date()
+                except:
+                    date_obj = datetime.now().date()
+            
+            # Получаем существующие события на эту дату для проверки конфликтов
+            existing_events = []
+            if db_session and user_id:
                 existing_events = db_session.query(Event).filter(
                     Event.user_id == user_id,
-                    Event.start_time >= datetime.combine(target_date, datetime.min.time()),
-                    Event.start_time < datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+                    Event.start_time >= datetime.combine(date_obj, datetime.min.time()),
+                    Event.start_time < datetime.combine(date_obj + timedelta(days=1), datetime.min.time())
                 ).all()
-
-                # Предлагаем оптимальное время
-                suggested_time = suggest_optimal_time(target_date, description, existing_events)
-
-                if suggested_time:
+            
+            # Определяем время начала
+            suggested_time_dt = None
+            if time_str:
+                try:
+                    hour, minute = map(int, time_str.split(':'))
+                    suggested_time_dt = datetime.combine(date_obj, dtime(hour, minute))
+                except:
+                    pass
+            
+            # Если время не указано, предлагаем оптимальное
+            if not suggested_time_dt:
+                suggested = suggest_optimal_time(date_obj, title, existing_events, priority)
+                if suggested:
+                    suggested_time_dt = suggested
+                else:
+                    # Если нет свободного времени, возвращаем альтернативы
                     return {
-                        'type': 'event_suggestion',
-                        'data': {
-                            'date': target_date,
-                            'description': description,
-                            'suggested_time': suggested_time,
-                            'free_slots_count': len(get_free_slots_for_date(target_date, existing_events))
-                        }
+                        'type': 'text',
+                        'content': f'На {date_obj.strftime("%d.%m.%Y")} нет свободного времени для события "{title}". Попробуйте выбрать другую дату.'
+                    }
+            
+            # Проверяем конфликт перед предложением
+            end_time_dt = suggested_time_dt + timedelta(minutes=duration_min)
+            if has_conflict(suggested_time_dt, end_time_dt, existing_events):
+                # Конфликт обнаружен - предлагаем альтернативы
+                alternative = suggest_optimal_time_with_exclusions(
+                    date_obj, title, existing_events, priority, 
+                    exclude_times=[suggested_time_dt.strftime('%H:%M')]
+                )
+                if alternative:
+                    alternative_str = alternative.strftime('%H:%M')
+                    return {
+                        'type': 'text',
+                        'content': f'Время {suggested_time_dt.strftime("%H:%M")} занято. Предлагаю альтернативу: {alternative_str}'
                     }
                 else:
                     return {
                         'type': 'text',
-                        'content': f"Извините, на {target_date.strftime('%d.%m.%Y')} нет свободного времени для события '{description}'. Попробуйте выбрать другую дату."
+                        'content': f'Время {suggested_time_dt.strftime("%H:%M")} занято, и нет других свободных окон на эту дату.'
                     }
+            
+            # Генерируем idempotency_key
+            idempotency_key = generate_idempotency_key(
+                user_id or 0,
+                title,
+                date_obj.isoformat(),
+                suggested_time_dt.strftime('%H:%M'),
+                duration_min
+            )
+            
+            # Возвращаем event_suggestion согласно контракту
+            return {
+                'type': 'event_suggestion',
+                'title': title,
+                'date': date_obj.isoformat(),
+                'start': suggested_time_dt.strftime('%H:%M'),
+                'duration_min': duration_min,
+                'category': category,
+                'priority': priority,
+                'actions': ['confirm', 'cancel', 'other_time'],
+                'idempotency_key': idempotency_key
+            }
 
-    # Если есть сессия БД — передаём существующие таски в модель как контекст
-    existing_tasks = None
-    if db_session is not None and user_id is not None:
+        error_msg = structured.get("error") or "Не удалось обработать запрос"
+        return {
+            'type': 'text',
+            'content': error_msg,
+            'structured': structured
+        }
+    
+    # Обработка chat-запросов (intent == "chat")
+    try:
+        # Импортируем клиент устойчиво: сначала пробуем пакет, затем модуль
         try:
-            from backend.database import Event
-            evs = db_session.query(Event).filter(Event.user_id == user_id).all()
-            existing_tasks = []
-            for e in evs:
-                existing_tasks.append({
-                    'id': e.id,
-                    'title': e.title,
-                    'start': e.start_time.isoformat() if e.start_time else None,
-                    'end': e.end_time.isoformat() if e.end_time else None,
-                    'source': e.source,
-                    'external_id': e.external_id
-                })
+            from backend.ai_client import post_conversation
         except Exception:
-            existing_tasks = None
+            from ai_client import post_conversation
 
-    # Проверяем, является ли сообщение задачей
-    if not is_task_request(message):
-        # Это обычное сообщение - переходим к чат-режиму
-        try:
-            # Импортируем клиент устойчиво: сначала пробуем пакет, затем модуль
-            try:
-                from backend.ai_client import post_conversation
-            except Exception:
-                from ai_client import post_conversation
-
-            conv = post_conversation(message)
-            if conv.get('success') and conv.get('raw'):
-                # Возвращаем текстовый ответ модели (чат-режим)
-                return {
-                    'success': True,
-                    'original_text': message,
-                    'processed_task': None,
-                    'warnings': [],
-                    'type': 'text',
-                    'content': conv.get('raw')
-                }
-            else:
-                return {
-                    'success': True,
-                    'original_text': message,
-                    'processed_task': None,
-                    'warnings': [],
-                    'type': 'text',
-                    'content': 'Извините, я не смог обработать ваш запрос. Попробуйте переформулировать.'
-                }
-        except Exception as e:
+        conv = post_conversation(message)
+        if conv.get('success') and conv.get('raw'):
+            # Возвращаем текстовый ответ модели (чат-режим)
             return {
                 'success': True,
                 'original_text': message,
                 'processed_task': None,
                 'warnings': [],
                 'type': 'text',
-                'content': 'Произошла ошибка при обработке сообщения.'
+                'content': conv.get('raw')
             }
-
-    structured = extract_task_via_gigachat(message, existing_tasks=existing_tasks)
-
-    # Если модель вернула удачно распознанную задачу — предложим пользователю подтверждение
-    if structured.get("success"):
-        processed = structured["processed_task"] or {}
-
-        # Попытка предложить оптимальное время на основе существующих событий
-        suggested_time = None
-        try:
-            if db_session is not None and user_id is not None and processed:
-                # преобразуем дату и description в объекты
-                from datetime import datetime as _dt
-                date_str = processed.get('date')
-                desc = processed.get('title') or processed.get('description') or ''
-                priority = processed.get('priority', 'medium')
-                if date_str:
-                    date_obj = _dt.fromisoformat(date_str).date()
-                    # используем локальную функцию suggest_optimal_time
-                    suggested = suggest_optimal_time(date_obj, desc, evs if 'evs' in locals() else [], priority)
-                    if suggested:
-                        suggested_time = suggested.strftime('%H:%M')
-        except Exception:
-            suggested_time = None
-
-        date_part = processed.get("date")
-        time_part = processed.get("time") or (suggested_time or "время не указано")
-        title = processed.get("title", "Задача")
-
-        summary = f"Предлагаю добавить: '{title}' на {date_part} {time_part}. Категория: {processed.get('category')}. Приоритет: {processed.get('priority')}"
-        if structured.get("warnings"):
-            summary += "\nПредупреждения: " + "; ".join(structured["warnings"])
-
-        # Если есть назначений view от модели — включаем их в ответ для фронтенда
-        assignments = None
-        try:
-            raw_model = structured.get('raw_model')
-            parsed_raw = _safe_json_loads(raw_model)
-            if isinstance(parsed_raw, dict) and parsed_raw.get('assignments'):
-                assignments = parsed_raw.get('assignments')
-        except Exception:
-            assignments = None
-
+        else:
+            return {
+                'success': True,
+                'original_text': message,
+                'processed_task': None,
+                'warnings': [],
+                'type': 'text',
+                'content': 'Извините, я не смог обработать ваш запрос. Попробуйте переформулировать.'
+            }
+    except Exception as e:
         return {
-            'type': 'proposal',
-            'content': summary,
-            'structured': structured,
-            'suggested_time': suggested_time,
-            'needs_confirmation': True,
-            'assignments': assignments
+            'success': True,
+            'original_text': message,
+            'processed_task': None,
+            'warnings': [],
+            'type': 'text',
+            'content': 'Произошла ошибка при обработке сообщения.'
         }
-
-    error_msg = structured.get("error") or "Не удалось обработать запрос"
-    return {
-        'type': 'text',
-        'content': error_msg,
-        'structured': structured
-    }
