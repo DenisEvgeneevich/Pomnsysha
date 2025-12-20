@@ -37,11 +37,22 @@ CLIENT_SECRETS_FILE = os.path.join("secrets", "client_secret.json")
 SCOPES = ["https://www.googleapis.com/auth/calendar",
           "https://www.googleapis.com/auth/calendar.events"]
 REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8000/oauth2/callback")
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8000"))
 
 app = FastAPI(title="Помняша Backend")
 
+# Healthcheck endpoint
+@app.get("/health")
+async def health_check():
+    """Healthcheck endpoint for monitoring and load balancers"""
+    return {
+        "status": "healthy",
+        "service": "pomnsysha-backend",
+        "timestamp": datetime.now().isoformat()
+    }
 
-origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -965,4 +976,4 @@ def startup():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("backend.app:app", host=HOST, port=PORT, reload=os.getenv("DEBUG", "false").lower() == "true")

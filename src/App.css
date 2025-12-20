@@ -4,38 +4,51 @@
     box-sizing: border-box;
 }
 
+html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    overflow-x: hidden;
+    width: 100%;
+    position: relative;
+}
+
 ul {
     margin: 0;
     padding: 0;
     list-style-type: none;
 }
 
-body {
-    font-family: 'Montserrat', sans-serif;
-}
-
 label {
     display: flex;
     align-items: center;
-    gap: 17px;
+    gap: 12px;
     cursor: pointer;
 }
 
 label span {
-    font-size: 21px;
+    font-size: 16px;
     font-weight: 700;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 label input[type='checkbox']{
     appearance: none;
     -webkit-appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
     border: 2px solid #ccc;
     border-radius: 3px;
     background: white;
     cursor: pointer;
     position: relative;
+    flex-shrink: 0;
 }
 
 label input[type="checkbox"]:hover {
@@ -48,56 +61,72 @@ label input[type="checkbox"]:checked {
 }
 
 .container {
-    max-width: 85vw;
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
+    padding: 0 16px;
 }
+
+/* Mobile-first: базовые стили для мобилки (320-430px) */
 
 .app-wrapper {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .main {
     display: flex;
     flex: 1 0 auto;
     width: 100%;
+    max-width: 100%;
     background-color: #FFAE3E;
-    padding: 0 0 20px 0;
-    min-height: calc(100vh - 150px);
+    padding: 16px 0 20px 0;
+    min-height: calc(100vh - 90px);
+    overflow-x: hidden;
 }
 
 .main-todos {
-    margin-top: 55px;
+    margin: 20px auto 0;
     display: flex;
-    height: 85vh;
-    width: 70vw;
+    min-height: auto;
+    width: 100%;
+    max-width: 100%;
     flex-direction: column;
-    justify-content: center;
-    gap: 70px;
-    border-radius: 25px;
-    padding: 90px 80px;
+    justify-content: flex-start;
+    gap: 24px;
+    border-radius: 20px;
+    padding: 24px 16px;
     background-color: #FFF9DA;
 }
 
 .main-hello {
-    font-size: 45px;
+    font-size: 24px;
     color: #573D27;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.3;
 }
 
 .main-title {
-    font-size: 30px;
+    font-size: 18px;
     color: #573D27;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.4;
 }
 
 .main-list {
     background-color: #FFFFFF;
     color: #573D27;
-    border-radius: 30px;
-    padding: 60px 50px;
+    border-radius: 20px;
+    padding: 20px 16px;
     display: flex;
     flex-direction: column;
     gap: 12px;
+    width: 100%;
 }
 
 .main-list li {
@@ -119,32 +148,41 @@ label input[type="checkbox"]:checked {
 
 .main-btn {
     display: block;
-    padding: 20px 40px;
+    padding: 14px 24px;
+    min-height: 44px;
     background-color: #C18F64;
     color: #FFF9DA;
     border: none;
-    border-radius: 30px;
+    border-radius: 20px;
     font-weight: 600;
-    font-size: 20px;
+    font-size: 16px;
     cursor: pointer;
     transition: all .3s ease;
-    white-space: nowrap;
+    width: 100%;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .main-btn:hover {
-    background-color: #f5e0e0;
-    color: #866346;
+    background-color: #a87a52;
+    transform: translateY(-1px);
+}
+
+.main-btn:active {
+    transform: translateY(0);
 }
 
 .footer {
   flex-shrink: 0;
   background-color: #573D27;
   color: #FFF9DA;
-  padding: 20px 0;
-  height: 90px;
+  padding: 16px 0;
+  min-height: 90px;
   display: flex;
   align-items: center;
   width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .footer-content {
@@ -152,24 +190,28 @@ label input[type="checkbox"]:checked {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  gap: 20px;
+  gap: 12px;
+  padding: 0 16px;
 }
 
 .footer-icons-panel {
   background-color: #FFFFFF;
   border-radius: 15px;
-  padding: 5px 20px;
-  width: 130%;
+  padding: 8px 16px;
+  width: 100%;
+  max-width: 100%;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 40px;
+  gap: 24px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
 .icon-button {
-  width: 65px;
-  height: 65px;
+  min-width: 56px;
+  min-height: 56px;
+  width: 56px;
+  height: 56px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -178,10 +220,10 @@ label input[type="checkbox"]:checked {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
+  padding: 4px;
   position: relative;
+  flex-shrink: 0;
 }
-
 
 .icon-button:hover {
   transform: scale(1.1);
@@ -192,36 +234,44 @@ label input[type="checkbox"]:checked {
 }
 
 .icon-button img {
-  width: 55px;
-  height: 55px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
   border-radius: 10px;
 }
 
 .google-auth-section {
   display: flex;
-  justify-content: flex-end;
-  gap: 15px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   margin-bottom: 20px;
-  padding: 0 10px;
+  padding: 0 16px;
+  width: 100%;
 }
 
 .google-auth-btn {
   background: #573D27;
   color: white;
   border: none;
-  padding: 12px 20px;
-  border-radius: 25px;
+  padding: 14px 20px;
+  min-height: 44px;
+  border-radius: 20px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   font-family: 'Montserrat', sans-serif;
+  width: 100%;
 }
 
 .google-auth-btn:hover {
   background: #C18F64;
-  transform: translateY(-2px);
+  transform: translateY(-1px);
+}
+
+.google-auth-btn:active {
+  transform: translateY(0);
 }
 
 .google-auth-btn.authenticated {
@@ -232,18 +282,24 @@ label input[type="checkbox"]:checked {
   background: #FFAE3E;
   color: #573D27;
   border: none;
-  padding: 12px 20px;
-  border-radius: 25px;
+  padding: 14px 20px;
+  min-height: 44px;
+  border-radius: 20px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   font-family: 'Montserrat', sans-serif;
+  width: 100%;
 }
 
 .sync-toggle:hover {
   background: #FFC107;
-  transform: translateY(-2px);
+  transform: translateY(-1px);
+}
+
+.sync-toggle:active {
+  transform: translateY(0);
 }
 
 .sync-toggle.syncing {
@@ -251,18 +307,129 @@ label input[type="checkbox"]:checked {
   color: white;
 }
 
-/* Адаптивность для кнопок авторизации */
-@media (max-width: 768px) {
-  .google-auth-section {
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 10px;
+/* Tablet: 640px - 1024px */
+@media (min-width: 640px) {
+  .container {
+    max-width: 90vw;
+    padding: 0 24px;
   }
-  
+
+  .main-todos {
+    max-width: 600px;
+    padding: 32px 24px;
+    gap: 32px;
+  }
+
+  .main-hello {
+    font-size: 32px;
+  }
+
+  .main-title {
+    font-size: 22px;
+  }
+
+  .main-list {
+    padding: 32px 24px;
+  }
+
+  label span {
+    font-size: 18px;
+  }
+
+  .main-btn {
+    width: auto;
+    padding: 16px 32px;
+    font-size: 18px;
+  }
+
+  .footer-icons-panel {
+    gap: 32px;
+    padding: 8px 24px;
+  }
+
+  .icon-button {
+    width: 60px;
+    height: 60px;
+    min-width: 60px;
+    min-height: 60px;
+  }
+
+  .icon-button img {
+    width: 52px;
+    height: 52px;
+  }
+
+  .google-auth-section {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
   .google-auth-btn,
   .sync-toggle {
-    padding: 10px 16px;
-    font-size: 14px;
+    width: auto;
+    padding: 12px 20px;
+  }
+}
+
+/* Desktop: > 1024px */
+@media (min-width: 1024px) {
+  .container {
+    max-width: 85vw;
+    padding: 0 40px;
+  }
+
+  .main-todos {
+    max-width: 70vw;
+    padding: 60px 50px;
+    gap: 50px;
+  }
+
+  .main-hello {
+    font-size: 45px;
+  }
+
+  .main-title {
+    font-size: 30px;
+  }
+
+  .main-list {
+    padding: 50px 40px;
+  }
+
+  label {
+    gap: 17px;
+  }
+
+  label span {
+    font-size: 21px;
+  }
+
+  .main-btn {
+    padding: 20px 40px;
+    font-size: 20px;
+  }
+
+  .footer {
+    padding: 20px 0;
+  }
+
+  .footer-icons-panel {
+    width: auto;
+    padding: 5px 20px;
+    gap: 40px;
+  }
+
+  .icon-button {
+    width: 65px;
+    height: 65px;
+    min-width: 65px;
+    min-height: 65px;
+  }
+
+  .icon-button img {
+    width: 55px;
+    height: 55px;
   }
 }
 
