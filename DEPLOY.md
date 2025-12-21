@@ -499,3 +499,5 @@ docker-compose up -d --build
 
 Готово! Ваше приложение должно быть доступно по адресу https://yourdomain.com
 
+
+

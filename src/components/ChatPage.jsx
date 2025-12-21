@@ -1,7 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './ChatPage.css';
+import { fetchWithSession } from '../utils/session';
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
+// В проде по умолчанию работаем через nginx-прокси: /api -> backend
+// Локально можно переопределить: REACT_APP_API_URL=http://localhost:8000
+const API_URL = (process.env.REACT_APP_API_URL ?? "").replace(/\/+$/, "");
 
 const ChatPage = ({ onBack }) => {
   const [messages, setMessages] = useState([
@@ -17,6 +20,16 @@ const ChatPage = ({ onBack }) => {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
+  const apiFetch = useCallback((path, options = {}) => {
+    return fetchWithSession(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -26,15 +39,15 @@ const ChatPage = ({ onBack }) => {
   }, [messages]);
 
   const sendMessageToAPI = async (text) => {
-    const response = await fetch(`${API_URL}/chat`, {
+    const response = await apiFetch(`/chat`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text })
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const bodyText = await response.text().catch(() => "");
+      throw new Error(`HTTP ${response.status}: ${bodyText || response.statusText}`);
     }
 
     const data = await response.json();
@@ -44,44 +57,21 @@ const ChatPage = ({ onBack }) => {
 
   const confirmEventCreation = async (eventData) => {
     try {
-      const response = await fetch(`${API_URL}/confirm-event`, {
+      const response = await apiFetch(`/confirm-event`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(eventData)
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const bodyText = await response.text().catch(() => "");
+        throw new Error(`HTTP ${response.status}: ${bodyText || response.statusText}`);
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
       throw new Error(`Ошибка создания события: ${error.message}`);
-    }
-  };
-
-  const formatDateLocal = (d) => {
-    try {
-      const dt = new Date(d);
-      const y = dt.getFullYear();
-      const m = String(dt.getMonth() + 1).padStart(2, '0');
-      const day = String(dt.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    } catch (e) {
-      return d;
-    }
-  };
-
-  const formatTimeLocal = (d) => {
-    try {
-      const dt = new Date(d);
-      const hh = String(dt.getHours()).padStart(2, '0');
-      const mm = String(dt.getMinutes()).padStart(2, '0');
-      return `${hh}:${mm}`;
-    } catch (e) {
-      return d;
     }
   };
 
@@ -97,29 +87,31 @@ const ChatPage = ({ onBack }) => {
     };
 
     setMessages(prev => [...prev, userMsg]);
+    const textToSend = inputMessage;
     setInputMessage('');
     setIsLoading(true);
 
     try {
-      const botResponse = await sendMessageToAPI(inputMessage);
+      const botResponse = await sendMessageToAPI(textToSend);
 
       let botMsg;
 
       // Нормализуем ответ модели
-      const respType = (botResponse && typeof botResponse === 'object' && botResponse.type) || (typeof botResponse === 'string' ? 'text' : 'text');
+      const respType =
+        (botResponse && typeof botResponse === 'object' && botResponse.type) ||
+        (typeof botResponse === 'string' ? 'text' : 'text');
+
       const respContent = (botResponse && typeof botResponse === 'object')
         ? (botResponse.content ?? botResponse.reply ?? botResponse.text ?? JSON.stringify(botResponse))
         : botResponse;
 
-      // Обработка availability_result (запросы о свободном времени)
-      // ВАЖНО: availability_result НЕ создаёт события, НЕ показывает кнопки!
+      // availability_result: только текст
       if (respType === 'availability_result' || (botResponse && botResponse.type === 'availability_result')) {
         const availData = botResponse;
         const slots = availData.slots || [];
         const message = availData.message || 'Свободные окна не найдены';
         const hintCommand = availData.hint_command || null;
-        
-        // Формируем текст с информацией о слотах
+
         let fullText = message;
         if (slots.length > 0) {
           fullText += '\n\nДоступные окна:';
@@ -131,7 +123,7 @@ const ChatPage = ({ onBack }) => {
         if (hintCommand) {
           fullText += `\n\n💡 ${hintCommand}`;
         }
-        
+
         botMsg = {
           id: Date.now() + 1,
           text: fullText,
@@ -161,7 +153,6 @@ const ChatPage = ({ onBack }) => {
           }
         };
       } else if (respType === 'event_suggestion' || (botResponse && botResponse.type === 'event_suggestion')) {
-        // Новый контракт event_suggestion
         const eventData = botResponse;
         const title = eventData.title || 'Событие';
         const date = eventData.date || '';
@@ -169,9 +160,9 @@ const ChatPage = ({ onBack }) => {
         const durationMin = eventData.duration_min || 60;
         const category = eventData.category || 'Личное';
         const idempotencyKey = eventData.idempotency_key || null;
-        
+
         const dateDisplay = date ? new Date(date).toLocaleDateString('ru-RU') : '';
-        
+
         botMsg = {
           id: Date.now() + 1,
           text: `Предлагаю добавить: "${title}" на ${dateDisplay} в ${start} (${durationMin} минут). Категория: ${category}`,
@@ -200,14 +191,15 @@ const ChatPage = ({ onBack }) => {
 
       setMessages(prev => [...prev, botMsg]);
 
-      // Если модель прислала назначения `assignments`, попробуем сохранить их в бэкенд
+      // assignments -> бек
       try {
-        const assignments = (botResponse && (botResponse.assignments || (botResponse.structured && botResponse.structured.assignments))) || null;
+        const assignments =
+          (botResponse && (botResponse.assignments || (botResponse.structured && botResponse.structured.assignments))) || null;
+
         if (assignments && typeof assignments === 'object') {
-          fetch(`${API_URL}/assignments`, {
+          apiFetch(`/assignments`, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ assignments })
           }).catch(() => null);
         }
@@ -238,7 +230,6 @@ const ChatPage = ({ onBack }) => {
     setIsLoading(true);
 
     try {
-      // Добавляем idempotency_key и duration_min если есть
       const eventDataWithKey = {
         ...eventData,
         idempotency_key: eventData.idempotency_key || null,
@@ -248,17 +239,13 @@ const ChatPage = ({ onBack }) => {
 
       const confirmMsg = {
         id: Date.now() + 2,
-        text: result.success
-          ? `✅ ${result.message}`
-          : `❌ ${result.message}`,
+        text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
         isUser: false,
         timestamp: new Date()
       };
 
       setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { ...msg, eventSuggestion: null } // Убираем кнопки после ответа
-          : msg
+        msg.id === messageId ? { ...msg, eventSuggestion: null } : msg
       ));
 
       setMessages(prev => [...prev, confirmMsg]);
@@ -285,9 +272,7 @@ const ChatPage = ({ onBack }) => {
     };
 
     setMessages(prev => prev.map(msg =>
-      msg.id === messageId
-        ? { ...msg, eventSuggestion: null } // Убираем кнопки
-        : msg
+      msg.id === messageId ? { ...msg, eventSuggestion: null } : msg
     ));
 
     setMessages(prev => [...prev, cancelMsg]);
@@ -305,19 +290,21 @@ const ChatPage = ({ onBack }) => {
           <div key={m.id} className={`message ${m.isUser ? 'user-message' : 'bot-message'}`}>
             <div className="message-content">
               {m.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+
               {m.eventSuggestion && (
                 <div className="event-confirmation">
                   <div className="event-details">
-                    <strong>📅 {m.eventSuggestion.description}</strong><br/>
-                    📆 {m.eventSuggestion.date ? new Date(m.eventSuggestion.date).toLocaleDateString('ru-RU') : ''}<br/>
+                    <strong>📅 {m.eventSuggestion.description}</strong><br />
+                    📆 {m.eventSuggestion.date ? new Date(m.eventSuggestion.date).toLocaleDateString('ru-RU') : ''}<br />
                     🕐 {m.eventSuggestion.time}
                   </div>
+
                   <div className="event-actions">
                     <button
                       className="confirm-btn"
                       onClick={() => handleConfirmEvent(m.id, {
                         date: (m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date) || m.eventSuggestion.date,
-                        time: m.eventSuggestion.time, // HH:MM
+                        time: m.eventSuggestion.time,
                         description: m.eventSuggestion.description,
                         duration_min: m.eventSuggestion.duration_min || 60,
                         idempotency_key: m.eventSuggestion.idempotency_key || null
@@ -326,6 +313,7 @@ const ChatPage = ({ onBack }) => {
                     >
                       ✅ Подтвердить
                     </button>
+
                     <button
                       className="cancel-btn"
                       onClick={() => handleCancelEvent(m.id)}
@@ -333,67 +321,58 @@ const ChatPage = ({ onBack }) => {
                     >
                       ❌ Отмена
                     </button>
+
                     <button
                       className="other-time-btn"
                       onClick={async () => {
                         setIsLoading(true);
                         try {
-                          // Собираем все уже предложенные времена для исключения
                           const excludeTimes = [];
-                          if (m.eventSuggestion.time) {
-                            excludeTimes.push(m.eventSuggestion.time);
-                          }
-                          if (m.eventSuggestion.previousTimes) {
-                            excludeTimes.push(...m.eventSuggestion.previousTimes);
-                          }
-                          
-                          // Запросим новое оптимальное время у ИИ
-                          const res = await fetch(`${API_URL}/suggest-times`, {
+                          if (m.eventSuggestion.time) excludeTimes.push(m.eventSuggestion.time);
+                          if (m.eventSuggestion.previousTimes) excludeTimes.push(...m.eventSuggestion.previousTimes);
+
+                          const res = await apiFetch(`/suggest-times`, {
                             method: 'POST',
                             credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
+                            body: JSON.stringify({
                               date: m.eventSuggestion.date && m.eventSuggestion.date.split ? m.eventSuggestion.date.split('T')[0] : m.eventSuggestion.date,
                               description: m.eventSuggestion.description,
                               priority: 'medium',
                               exclude_times: excludeTimes
                             })
                           });
-                          
+
                           if (!res.ok) {
-                            const errorData = await res.json();
-                            throw new Error(errorData.error || 'Ошибка получения времени');
+                            const errorText = await res.text().catch(() => "");
+                            throw new Error(errorText || 'Ошибка получения времени');
                           }
-                          
+
                           const body = await res.json();
                           const newTime = body.time;
                           const message = body.message || `Предлагаю новое время: ${newTime}`;
-                          
+
                           if (newTime) {
-                            // Сохраняем предыдущие времена
                             const previousTimes = [
                               ...(m.eventSuggestion.previousTimes || []),
                               ...(m.eventSuggestion.time ? [m.eventSuggestion.time] : [])
                             ];
-                            
-                            // Обновляем сообщение с новым временем
-                            setMessages(prev => prev.map(msg => 
-                              msg.id === m.id 
-                                ? { 
-                                    ...msg, 
-                                    eventSuggestion: { 
-                                      ...msg.eventSuggestion, 
-                                      time: newTime,
-                                      previousTimes: previousTimes,
-                                      newTimeProposed: true,
-                                      newTimeMessage: message
-                                    } 
-                                  } 
+
+                            setMessages(prev => prev.map(msg =>
+                              msg.id === m.id
+                                ? {
+                                  ...msg,
+                                  eventSuggestion: {
+                                    ...msg.eventSuggestion,
+                                    time: newTime,
+                                    previousTimes: previousTimes,
+                                    newTimeProposed: true,
+                                    newTimeMessage: message
+                                  }
+                                }
                                 : msg
                             ));
                           }
                         } catch (e) {
-                          // Показываем ошибку пользователю
                           const errorMsg = {
                             id: Date.now() + 1000,
                             text: `⚠ ${e.message || 'Не удалось получить новое время'}`,
@@ -410,6 +389,7 @@ const ChatPage = ({ onBack }) => {
                       🕘 Другое время
                     </button>
                   </div>
+
                   {m.eventSuggestion.newTimeProposed && m.eventSuggestion.newTimeMessage && (
                     <div className="new-time-proposal">
                       <div className="new-time-message">{m.eventSuggestion.newTimeMessage}</div>
@@ -434,6 +414,7 @@ const ChatPage = ({ onBack }) => {
                 </div>
               )}
             </div>
+
             <span className="message-time">
               {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>

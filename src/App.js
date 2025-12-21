@@ -9,7 +9,9 @@ import icon3 from './icons/Stats.png';
 import './App.css';
 import { fetchWithSession } from './utils/session';
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
+// В проде по умолчанию работаем через nginx-прокси: /api -> backend
+// Локально можно переопределить: REACT_APP_API_URL=http://localhost:8000
+const API_URL = (process.env.REACT_APP_API_URL ?? "").replace(/\/+$/, "");
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -88,7 +90,7 @@ const App = () => {
       await loadTasks();
     } catch (error) {
       console.error("Ошибка добавления:", error);
-      alert(`Ошибка соединения с сервером: ${error.message}. Убедитесь, что backend запущен на http://localhost:8000`);
+      alert(`Ошибка соединения с сервером: ${error.message}`);
     } finally {
       setIsLoading(false);
     }

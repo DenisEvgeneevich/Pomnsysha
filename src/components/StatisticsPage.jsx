@@ -8,26 +8,38 @@ const StatisticsPage = ({ onBack }) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     const loadStats = async () => {
       try {
         setIsLoading(true);
-        const response = await fetchWithSession('http://localhost:8000/stats');
+        setError(null);
+
+        // ВАЖНО: никаких localhost в проде.
+        // Через nginx API доступен как /api/...
+        const response = await fetchWithSession('/api/stats', {
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
-          throw new Error('Не удалось загрузить статистику');
+          const text = await response.text().catch(() => '');
+          throw new Error(`Не удалось загрузить статистику (${response.status}). ${text}`);
         }
 
         const data = await response.json();
         setStatsData(data);
       } catch (err) {
+        if (err?.name === 'AbortError') return;
         console.error('Ошибка загрузки статистики:', err);
-        setError(err.message);
+        setError(err?.message || 'Ошибка загрузки статистики');
       } finally {
         setIsLoading(false);
       }
     };
 
     loadStats();
+
+    return () => controller.abort();
   }, []);
 
   if (isLoading) {
@@ -62,7 +74,6 @@ const StatisticsPage = ({ onBack }) => {
 
   const { weeklyStats = [], pieData = [], mostBusyDay, totalEvents = 0 } = statsData || {};
 
-  // Функция для создания круговой диаграммы
   const renderPieChart = () => {
     if (!pieData || pieData.length === 0) {
       return (
@@ -77,13 +88,12 @@ const StatisticsPage = ({ onBack }) => {
 
     let currentAngle = 0;
 
-    return pieData.map((category, index) => {
+    return pieData.map((category) => {
       const angle = (category.value / 100) * 360;
       const startAngle = currentAngle;
       const endAngle = currentAngle + angle;
       currentAngle = endAngle;
 
-      // Координаты для SVG path
       const startX = 100 + 80 * Math.cos((startAngle - 90) * (Math.PI / 180));
       const startY = 100 + 80 * Math.sin((startAngle - 90) * (Math.PI / 180));
       const endX = 100 + 80 * Math.cos((endAngle - 90) * (Math.PI / 180));
@@ -100,17 +110,12 @@ const StatisticsPage = ({ onBack }) => {
 
       return (
         <g key={category.name}>
-          <path
-            d={pathData}
-            fill={category.color}
-            stroke="#FFF9DA"
-            strokeWidth="2"
-          />
-          {/* Текст с процентами в центре сегмента */}
-          {category.value > 5 && ( // Показываем проценты только если сегмент достаточно большой
+          <path d={pathData} fill={category.color} stroke="#FFF9DA" strokeWidth="2" />
+
+          {category.value > 5 && (
             <text
-              x={100 + 40 * Math.cos((startAngle + angle/2 - 90) * (Math.PI / 180))}
-              y={100 + 40 * Math.sin((startAngle + angle/2 - 90) * (Math.PI / 180))}
+              x={100 + 40 * Math.cos((startAngle + angle / 2 - 90) * (Math.PI / 180))}
+              y={100 + 40 * Math.sin((startAngle + angle / 2 - 90) * (Math.PI / 180))}
               textAnchor="middle"
               dominantBaseline="middle"
               fill="white"
@@ -126,9 +131,10 @@ const StatisticsPage = ({ onBack }) => {
     });
   };
 
+  const maxTasks = weeklyStats.length > 0 ? Math.max(...weeklyStats.map(d => d.tasks)) : 0;
+
   return (
     <div className="statistics-page">
-      {/* Шапка - только кнопка назад */}
       <header className="stats-header">
         <button className="back-button" onClick={onBack}>
           ← Вернуться назад
@@ -136,25 +142,20 @@ const StatisticsPage = ({ onBack }) => {
       </header>
 
       <div className="stats-content">
-        {/* Круговая диаграмма */}
         <div className="stats-section">
           <h2>Статистика задач ({totalEvents} всего)</h2>
+
           <div className="pie-chart-container">
             <svg width="200" height="200" viewBox="0 0 200 200" className="pie-chart">
               {renderPieChart()}
-              {/* Центральный круг */}
               <circle cx="100" cy="100" r="30" fill="#FFF9DA" />
             </svg>
 
-            {/* Легенда */}
             <div className="pie-legend">
               {pieData && pieData.length > 0 ? (
-                pieData.map((category, index) => (
+                pieData.map((category) => (
                   <div key={category.name} className="legend-item">
-                    <div
-                      className="legend-color"
-                      style={{ backgroundColor: category.color }}
-                    ></div>
+                    <div className="legend-color" style={{ backgroundColor: category.color }}></div>
                     <span className="legend-name">{category.name}</span>
                     <span className="legend-value">{category.value}%</span>
                   </div>
@@ -169,23 +170,21 @@ const StatisticsPage = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Статистика по дням недели */}
         <div className="stats-section">
           <h2>Загруженность по дням недели</h2>
+
           <div className="days-stats">
             {weeklyStats && weeklyStats.length > 0 ? (
               weeklyStats.map(day => (
-                <div
-                  key={day.day}
-                  className={`day-item ${day.isMostBusy ? 'most-busy' : ''}`}
-                >
+                <div key={day.day} className={`day-item ${day.isMostBusy ? 'most-busy' : ''}`}>
                   <span className="day-name">{day.day}</span>
+
                   <div className="day-tasks">
                     <span className="tasks-count">{day.tasks} задач</span>
                     <div
                       className="tasks-bar"
                       style={{
-                        width: weeklyStats.length > 0 ? `${(day.tasks / Math.max(...weeklyStats.map(d => d.tasks))) * 100}%` : '0%'
+                        width: maxTasks > 0 ? `${(day.tasks / maxTasks) * 100}%` : '0%'
                       }}
                     ></div>
                   </div>
@@ -198,7 +197,6 @@ const StatisticsPage = ({ onBack }) => {
             )}
           </div>
 
-          {/* Самый загруженный день */}
           {mostBusyDay && mostBusyDay.tasks > 0 && (
             <div className="most-busy-day">
               <div className="most-busy-badge">Самый загруженный день</div>

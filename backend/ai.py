@@ -186,6 +186,59 @@ def _normalize_title(title: str) -> str:
     return cleaned[:1].upper() + cleaned[1:]
 
 
+def clean_event_title(title: str) -> str:
+    """
+    Очищает заголовок события от командных слов и служебных кусков.
+    Удаляет: ведущие глаголы/команды, даты, время, нормализует пробелы.
+    """
+    if not title:
+        return "Событие"
+    
+    text = title.strip()
+    
+    # Удаляем ведущие глаголы/команды (с формами)
+    command_patterns = [
+        r'^(поставь|поставить|добавь|добавить|создай|создать|запланируй|запланировать|назначь|назначить|напомни|напомнить|сделай|сделать)\s+',
+        r'^(поставь|поставить|добавь|добавить|создай|создать|запланируй|запланировать|назначь|назначить|напомни|напомнить|сделай|сделать)',
+    ]
+    for pattern in command_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # Удаляем ведущие "на завтра/завтра/сегодня/послезавтра"
+    date_prefixes = [
+        r'^(на\s+)?завтра\s+',
+        r'^(на\s+)?сегодня\s+',
+        r'^(на\s+)?послезавтра\s+',
+        r'^завтра\s+',
+        r'^сегодня\s+',
+        r'^послезавтра\s+',
+    ]
+    for pattern in date_prefixes:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # Удаляем упоминание времени вида "в 19:00" или просто "19:00"
+    text = re.sub(r'\s*в\s+\d{1,2}[:\.]\d{2}\s*', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*\d{1,2}[:\.]\d{2}\s*', ' ', text)
+    
+    # Нормализуем пробелы
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Делаем первую букву заглавной
+    if text:
+        text = text[0].upper() + text[1:]
+    
+    # Если результат пустой -> "Событие"
+    if not text:
+        return "Событие"
+    
+    # Специальные правила для прогулок
+    text_lower = text.lower()
+    if any(word in text_lower for word in ['гулять', 'прогуляться', 'прогулка']):
+        return "Прогулка"
+    
+    return text
+
+
 # Попробуем импортировать локальный парсер в разных контекстах (пакет или модуль)
 try:
     from backend.ai_parser import local_parse as local_ai_parse
@@ -196,10 +249,10 @@ except Exception:
         local_ai_parse = None
 
 
-def _safe_json_loads(raw):
+def safe_json_extract(raw: str) -> Optional[dict]:
     """
-    Пытается безопасно распарсить JSON из ответа модели,
-    даже если вокруг есть пояснительный текст или обёртки.
+    Улучшенная функция извлечения JSON из сырого ответа модели.
+    Убирает ```json ``` обёртки, находит первый сбалансированный {...} и парсит его.
     """
     if isinstance(raw, dict):
         return raw
@@ -207,12 +260,17 @@ def _safe_json_loads(raw):
     if not isinstance(raw, str):
         return None
 
-    candidates = [raw, re.sub(r"```json|```", "", raw).strip()]
+    # Убираем ```json ``` обёртки
+    candidates = [raw]
+    cleaned = re.sub(r'```json\s*', '', raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r'```\s*', '', cleaned)
+    if cleaned.strip() != raw.strip():
+        candidates.append(cleaned.strip())
 
     decoder = json.JSONDecoder()
 
-    def _extract_by_braces(s: str):
-        """Попробовать найти JSON-объект по балансировке фигурных скобок."""
+    def _extract_by_braces(s: str) -> Optional[str]:
+        """Находит первый сбалансированный {...} в строке."""
         start = s.find("{")
         if start == -1:
             return None
@@ -242,17 +300,17 @@ def _safe_json_loads(raw):
             except json.JSONDecodeError:
                 brace_index = candidate.find("{", brace_index + 1)
 
-        # Третий проход: извлечь сбалансированный фрагмент по скобкам и пробовать его
+        # Третий проход: извлечь сбалансированный фрагмент по скобкам
         try:
             fragment = _extract_by_braces(candidate)
             if fragment:
                 try:
                     return json.loads(fragment)
                 except json.JSONDecodeError:
-                    # Попробуем безопасно разобрать через ast.literal_eval (поддерживает одинарные кавычки)
+                    # Попробуем через ast.literal_eval (поддерживает одинарные кавычки)
                     try:
                         obj = ast.literal_eval(fragment)
-                        if isinstance(obj, (dict, list)):
+                        if isinstance(obj, dict):
                             return obj
                     except Exception:
                         pass
@@ -260,6 +318,15 @@ def _safe_json_loads(raw):
             pass
 
     return None
+
+
+def _safe_json_loads(raw):
+    """
+    Пытается безопасно распарсить JSON из ответа модели,
+    даже если вокруг есть пояснительный текст или обёртки.
+    Использует улучшенную safe_json_extract.
+    """
+    return safe_json_extract(raw)
 
 
 def _validate_and_enrich(parsed: dict, original_text: str) -> tuple[bool, dict, list[str]]:
@@ -587,7 +654,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
             return base_response
 
         raw_content = response_data["choices"][0]["message"].get("content", "")
-        parsed_json = _safe_json_loads(raw_content)
+        parsed_json = safe_json_extract(raw_content)
 
         # Если модель явно указала, что это не задача — короткий путь для текстового ответа
         try:
@@ -602,9 +669,7 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
         except Exception:
             pass
 
-        # Если парсинг не удался — попытаемся быстро "починить" ответ модели,
-        # вызвав специализированный короткий системный prompt, который вернёт
-        # ТОЛЬКО корректный JSON по нужной схеме.
+        # Если парсинг не удался — попытаемся быстро "починить" ответ модели
         if parsed_json is None and raw_content:
             try:
                 try:
@@ -620,16 +685,17 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
                         "Ты — ассистент-репаратор. Тебе дан сырой текст, сгенерированный другой моделью."
                         " Исправь формат и верни ТОЛЬКО корректный JSON в соответствии со схемой:"
                         " {\"title\": string, \"date\": string|null, \"time\": string|null,"
-                        " \"duration_minutes\": integer|null, \"priority\": string|null, \"category\": string|null}"
+                        " \"duration_minutes\": integer|null, \"priority\": string|null, \"category\": string|null}."
+                        " НИКАКОГО пояснительного текста, только JSON."
                     )
                     repair_user = (
                         "Ниже — сырой ответ модели. Исправь любые форматные ошибки и верни только JSON."
-                        f"\n\nСырой ответ:\n{raw_content}"
+                        f"\n\nСырой ответ:\n{raw_content[:500]}"
                     )
                     repair = post_custom(system_prompt=repair_system, user_text=repair_user, max_attempts=1, timeout=6)
                     if repair and repair.get('success') and repair.get('raw'):
                         repaired_raw = repair.get('raw')
-                        parsed_json = _safe_json_loads(repaired_raw)
+                        parsed_json = safe_json_extract(repaired_raw)
                         if parsed_json is not None:
                             raw_content = repaired_raw
             except Exception:
@@ -747,21 +813,15 @@ def extract_task_via_gigachat(user_text: str, existing_tasks: list = None) -> di
             except Exception:
                 pass
 
-            # Вместо того, чтобы возвращать фронтенду техническую ошибку,
-            # возвращаем дружелюбный текстовый ответ (чат-формат), чтобы
-            # пользователь не видел "Не удалось разобрать ответ модели".
-            try:
-                return {
-                    'success': True,
-                    'original_text': user_text,
-                    'processed_task': None,
-                    'warnings': warnings,
-                    'type': 'text',
-                    'content': 'Извините, не смог распознать задачу. Можете переформулировать или дать дополнительные подробности?'
-                }
-            except Exception:
-                base_response["error"] = "Не удалось разобрать ответ модели"
-                return base_response
+            # Возвращаем дружелюбное сообщение вместо технической ошибки
+            return {
+                'success': True,
+                'original_text': user_text,
+                'processed_task': None,
+                'warnings': warnings,
+                'type': 'text',
+                'content': 'Не смог распознать задачу. Можете переформулировать или дать дополнительные подробности?'
+            }
 
         return base_response
     except requests.exceptions.RequestException as exc:
@@ -1565,7 +1625,9 @@ def ask_gigachat(message: str, db_session=None, user_id=None) -> dict:
             from backend.database import Event
             
             # Определяем параметры события
-            title = processed.get("title", "Событие")
+            raw_title = processed.get("title", "Событие")
+            # Очищаем title от командных слов и служебных кусков
+            title = clean_event_title(raw_title)
             date_str = processed.get('date')
             time_str = processed.get('time')
             category = processed.get('category', 'Личное')

@@ -113,3 +113,5 @@ sudo tail -f /var/log/nginx/pomnsysha-error.log
 
 См. полную инструкцию в `DEPLOY.md`
 
+
+
