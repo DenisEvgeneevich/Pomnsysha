@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './StatisticsPage.css';
-import { fetchWithSession } from '../utils/session';
+import { fetchWithSession, API_URL } from '../utils/session'
 
 const StatisticsPage = ({ onBack }) => {
   const [statsData, setStatsData] = useState(null);

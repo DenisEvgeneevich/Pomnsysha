@@ -2,9 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import './CalendarPage.css';
 import { fetchWithSession } from '../utils/session';
 
-// В проде по умолчанию работаем через nginx-прокси: /api -> backend
-// Локально можно переопределить: REACT_APP_API_URL=http://localhost:8000
 const API_URL = process.env.REACT_APP_API_URL || "/api";
+
 
 const CalendarPage = ({ onBack, onTaskUpdate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -14,7 +13,7 @@ const CalendarPage = ({ onBack, onTaskUpdate }) => {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const apiFetch = useCallback((path, options = {}) => {
-    // path должен начинаться с /
+
     const url = `${API_URL}${path}`;
     return fetchWithSession(url, options);
   }, [API_URL]);

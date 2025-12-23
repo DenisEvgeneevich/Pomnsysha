@@ -2,9 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './ChatPage.css';
 import { fetchWithSession } from '../utils/session';
 
-// В проде по умолчанию работаем через nginx-прокси: /api -> backend
-// Локально можно переопределить: REACT_APP_API_URL=http://localhost:8000
-const API_URL = (process.env.REACT_APP_API_URL ?? "").replace(/\/+$/, "");
+const API_URL = (process.env.REACT_APP_API_URL ?? "/api").replace(/\/+$/, "");
+
 
 const ChatPage = ({ onBack }) => {
   const [messages, setMessages] = useState([
