@@ -59,7 +59,7 @@
   text-align: center;
 }
 
-/* Стили для круговой диаграммы */
+
 .pie-chart-container {
   display: flex;
   align-items: center;
@@ -113,7 +113,7 @@
   font-weight: 600;
 }
 
-/* Стили для статистики дней */
+
 .days-stats {
   display: flex;
   flex-direction: column;
@@ -172,7 +172,7 @@
   background: #FF6B6B;
 }
 
-/* Стили для самого загруженного дня */
+
 .most-busy-day {
   background: linear-gradient(135deg, #FF6B6B, #FF8F00);
   border-radius: 20px;
@@ -212,7 +212,7 @@
   font-weight: 600;
 }
 
-/* Стили для скроллбара */
+
 .stats-content::-webkit-scrollbar {
   width: 8px;
 }
@@ -231,7 +231,7 @@
   background: #a87a52;
 }
 
-/* Адаптивность */
+
 @media (max-width: 768px) {
   .statistics-page {
     height: calc(100vh - 160px);
