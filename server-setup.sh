@@ -21,15 +21,12 @@ EOF
 
 echo "📤 Uploading files..."
 
-# Upload frontend build
 echo "Uploading frontend..."
 scp -r build/* $SERVER_USER@$SERVER_HOST:$APP_DIR/frontend/
 
-# Upload backend
 echo "Uploading backend..."
 scp -r backend/* $SERVER_USER@$SERVER_HOST:$APP_DIR/backend/
 
-# Upload nginx config
 echo "Uploading nginx config..."
 scp nginx.conf.example $SERVER_USER@$SERVER_HOST:/tmp/pomnyasha-nginx.conf
 
@@ -40,7 +37,6 @@ echo "1. cd $APP_DIR/backend"
 echo "2. python3 -m venv venv"
 echo "3. source venv/bin/activate"
 echo "4. pip install -r requirements.txt"
-echo "5. Create .env file (see DEPLOY.md)"
-echo "6. Setup systemd service (see DEPLOY.md)"
-echo "7. Configure nginx (see DEPLOY.md)"
-
+echo "5. Create .env file with your credentials"
+echo "6. Setup systemd services"
+echo "7. Configure nginx using /tmp/pomnyasha-nginx.conf"
