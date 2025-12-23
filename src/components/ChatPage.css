@@ -166,7 +166,7 @@
   transform: none;
 }
 
-/* Анимации */
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -178,7 +178,7 @@
   }
 }
 
-/* Стили для скроллбара */
+
 .chat-messages::-webkit-scrollbar {
   width: 8px;
 }
@@ -197,7 +197,7 @@
   background:
 }
 
-/* Адаптивность */
+
 @media (max-width: 768px) {
   .chat-page {
     height: calc(100vh - 160px);
@@ -283,7 +283,7 @@
   }
 }
 
-/* Стили для подтверждения событий */
+
 .event-confirmation {
   margin-top: 15px;
   padding: 15px;

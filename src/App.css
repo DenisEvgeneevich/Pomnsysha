@@ -191,7 +191,7 @@ label input[type="checkbox"]:checked {
   overflow: hidden;
 }
 
-/* Стиль для зачёркнутых задач */
+
 .task-text[style*="line-through"] {
   color:
   font-style: italic;
@@ -330,7 +330,7 @@ label input[type="checkbox"]:checked {
   color: white;
 }
 
-/* Адаптивность для кнопок авторизации */
+
 @media (max-width: 768px) {
   .google-auth-section {
     flex-direction: column;
